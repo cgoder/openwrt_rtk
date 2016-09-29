@@ -1,0 +1,4 @@
+config system
+	option hostname rtl8881a
+	option timezone UTC
+

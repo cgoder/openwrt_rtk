@@ -1,0 +1,19 @@
+diff -urN old/drivers/net/wireless/Kconfig patch/drivers/net/wireless/Kconfig
+--- old/drivers/net/wireless/Kconfig	2014-01-22 14:14:32.000000000 +0800
++++ patch/drivers/net/wireless/Kconfig	2014-01-21 21:21:01.000000000 +0800
+@@ -280,5 +280,6 @@
+ source "drivers/net/wireless/ti/Kconfig"
+ source "drivers/net/wireless/zd1211rw/Kconfig"
+ source "drivers/net/wireless/mwifiex/Kconfig"
++source "drivers/net/wireless/rtl8192cd/Kconfig"
+ 
+ endif # WLAN
+diff -urN old/drivers/net/wireless/Makefile patch/drivers/net/wireless/Makefile
+--- old/drivers/net/wireless/Makefile	2014-01-22 14:14:27.000000000 +0800
++++ patch/drivers/net/wireless/Makefile	2014-01-21 21:21:17.000000000 +0800
+@@ -57,3 +57,5 @@
+ 
+ obj-$(CONFIG_BRCMFMAC)	+= brcm80211/
+ obj-$(CONFIG_BRCMSMAC)	+= brcm80211/
++
++obj-$(CONFIG_RTL8192CD)         += rtl8192cd/

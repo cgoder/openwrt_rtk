@@ -1,0 +1,94 @@
+--- a/include/net/netfilter/nf_conntrack.h
++++ b/include/net/netfilter/nf_conntrack.h
+@@ -25,6 +25,9 @@
+ #include <net/netfilter/ipv6/nf_conntrack_icmpv6.h>
+ 
+ #include <net/netfilter/nf_conntrack_tuple.h>
++#if defined(CONFIG_RTL_819X)
++#include <net/rtl/features/rtl_private_struct.h>
++#endif
+ 
+ /* per conntrack: protocol private data */
+ union nf_conntrack_proto {
+@@ -121,6 +124,9 @@ struct nf_conn {
+ 		unsigned int app_data_len;
+ 	} layer7;
+ #endif
++#if defined(CONFIG_RTL_819X)
++    struct rtl_nf_conn rtl_ct; /*if try to add member in kernel nf_conn, add to this structure, keep kernel clean*/
++#endif
+ 
+ 	/* Storage reserved for other modules, must be the last member */
+ 	union nf_conntrack_proto proto;
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -889,6 +889,9 @@ init_conntrack(struct net *net, struct n
+ 		NF_CT_STAT_INC(net, new);
+ 	}
+ 
++    #if defined(CONFIG_RTL_HW_NAT_BYPASS_PKT)
++    ct->rtl_ct.count= 0;
++    #endif
+ 	/* Overload tuple linked list to put us in unconfirmed list. */
+ 	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
+ 		       &net->ct.unconfirmed);
+--- a/net/netfilter/nf_conntrack_proto_tcp.c
++++ b/net/netfilter/nf_conntrack_proto_tcp.c
+@@ -30,6 +30,9 @@
+ #include <net/netfilter/nf_log.h>
+ #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
+ #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
++#if defined(CONFIG_RTL_HARDWARE_NAT)
++#include <net/rtl/features/rtl_ps_hooks.h>
++#endif
+ 
+ /* Do not check the TCP window for incoming packets  */
+ static int nf_ct_tcp_no_window_check __read_mostly = 1;
+@@ -841,6 +844,9 @@ static int tcp_packet(struct nf_conn *ct
+ 	struct tcphdr _tcph;
+ 	unsigned long timeout;
+ 	unsigned int index;
++#if defined(CONFIG_RTL_HARDWARE_NAT)
++	rtl_nf_conntrack_inso_s	conn_info;
++#endif
+ 
+ 	th = skb_header_pointer(skb, dataoff, sizeof(_tcph), &_tcph);
+ 	BUG_ON(th == NULL);
+@@ -851,6 +857,16 @@ static int tcp_packet(struct nf_conn *ct
+ 	index = get_conntrack_index(th);
+ 	new_state = tcp_conntracks[dir][index][old_state];
+ 	tuple = &ct->tuplehash[dir].tuple;
++#if defined(CONFIG_RTL_HARDWARE_NAT)
++	conn_info.net = net;
++	conn_info.ct = ct;
++	conn_info.skb = (struct sk_buff *)skb;
++	conn_info.hooknum = hooknum;
++	conn_info.ctinfo = ctinfo;
++	conn_info.new_state=new_state;
++	conn_info.old_state=old_state;
++	rtl_tcp_packet_hooks(&conn_info);
++#endif
+ 
+ 	switch (new_state) {
+ 	case TCP_CONNTRACK_SYN_SENT:
+--- a/net/netfilter/nf_nat_proto_common.c
++++ b/net/netfilter/nf_nat_proto_common.c
+@@ -81,6 +81,9 @@ void nf_nat_l4proto_unique_tuple(const s
+ 	else
+ 		off = *rover;
+ 
++#if defined (CONFIG_RTL_HARDWARE_NAT) && defined (CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
++    rtl_get_new_rover(portptr,min,off,range_size,rover,tuple,range,maniptype,ct);
++#else
+ 	for (i = 0; ; ++off) {
+ 		*portptr = htons(min + off % range_size);
+ 		if (++i != range_size && nf_nat_used_tuple(tuple, ct))
+@@ -89,6 +92,8 @@ void nf_nat_l4proto_unique_tuple(const s
+ 			*rover = off;
+ 		return;
+ 	}
++#endif
++
+ 	return;
+ }
+ EXPORT_SYMBOL_GPL(nf_nat_l4proto_unique_tuple);

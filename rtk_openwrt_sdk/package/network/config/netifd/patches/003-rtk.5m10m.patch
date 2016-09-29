@@ -1,0 +1,39 @@
+diff -urN old/scripts/netifd-wireless.sh patch/scripts/netifd-wireless.sh
+--- old/scripts/netifd-wireless.sh	2014-11-04 11:36:35.000000000 +0800
++++ patch/scripts/netifd-wireless.sh	2014-11-04 16:39:47.000000000 +0800
+@@ -39,7 +39,16 @@
+ }
+ 
+ _wdev_prepare_channel() {
+-	json_get_vars channel hwmode
++	json_get_vars channel hwmode rtk_ac_enable rtk_priv_bw
++
++	local radio=$1
++	local wlname="wlan${radio#radio}"
++
++	iwpriv "$wlname" set_mib rtk_ac_enable=0
++	[ -n "$rtk_ac_enable" ] && iwpriv "$wlname" set_mib rtk_ac_enable="$rtk_ac_enable"
++	
++	iwpriv "$wlname" set_mib rtk_priv_bw=0
++	[ -n "$rtk_priv_bw" ] && iwpriv "$wlname" set_mib rtk_priv_bw="$rtk_priv_bw"
+ 
+ 	auto_channel=0
+ 	enable_ht=0
+@@ -85,7 +94,7 @@
+ 	json_load "$data"
+ 
+ 	json_select config
+-	_wdev_prepare_channel
++	_wdev_prepare_channel "$interface"
+ 	json_select ..
+ 
+ 	eval "drv_$1_$2 \"$interface\""
+@@ -277,6 +286,8 @@
+ 
+ _wdev_common_device_config() {
+ 	config_add_string channel hwmode htmode
++	
++	config_add_string rtk_ac_enable rtk_priv_bw
+ }
+ 
+ _wdev_common_iface_config() {

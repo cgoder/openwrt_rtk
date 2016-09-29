@@ -1,0 +1,46 @@
+#
+# Board Configuration
+#
+menu "Board Configuration"
+
+choice
+	prompt "Board"
+	default RTL_8881A
+
+config RTL_8881A
+        bool "8881A"
+		select RTL_8196D
+		select RTL_819XD_GW
+		#select RTL819X_SPI_FLASH
+#		select AUTO_PCIE_PHY_SCAN
+		select RTL_NETDEV_NO_PRIV
+                select ARCH_BUS_USB
+                select BSP_ENABLE_USB
+                select USB_ARCH_HAS_EHCI
+                select USB_ARCH_HAS_OHCI
+
+#config RTL_8196D_GW
+#	bool "96D+92D GW"
+	#select FPGA_PLATFORM
+#	select RTL_8196D
+#	select RTL_819XD_GW
+#	select RTL_8881A
+#	select RTL819X_SPI_FLASH
+#	select AUTO_PCIE_PHY_SCAN
+#	select RTL_NETDEV_NO_PRIV
+#	help
+#		This enables support for Realtek RTL8196D demo board
+
+#config RTL_8197D_GW
+#	bool "97D+92C+92D GW"
+#	select RTL_8197D
+#	select RTL_819XD_GW
+#	select RTL819X_SPI_FLASH
+#	select RTL_NETDEV_NO_PRIV
+#	help
+#		This enables support for Realtek RTL8197D demo board
+          
+endchoice
+
+endmenu
+

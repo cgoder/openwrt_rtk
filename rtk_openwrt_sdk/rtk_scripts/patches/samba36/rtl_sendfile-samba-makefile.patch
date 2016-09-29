@@ -1,0 +1,21 @@
+diff -ruN before/Makefile after/Makefile
+--- before/Makefile	2015-04-07 16:48:42.029639500 +0800
++++ after/Makefile	2015-05-08 13:45:55.220511303 +0800
+@@ -6,6 +6,7 @@
+ #
+ 
+ include $(TOPDIR)/rules.mk
++include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_NAME:=samba
+ PKG_VERSION:=3.6.24
+@@ -62,6 +63,9 @@
+ endef
+ 
+ TARGET_CFLAGS += -DMAX_DEBUG_LEVEL=$(CONFIG_PACKAGE_SAMBA_MAX_DEBUG_LEVEL) -D__location__=\\\"\\\" -ffunction-sections -fdata-sections
++ifdef CONFIG_RTL_SENDFILE_PATCH
++TARGET_CFLAGS += -DCONFIG_RTL_SENDFILE_PATCH
++endif
+ TARGET_LDFLAGS += -Wl,--gc-sections
+ 
+ CONFIGURE_VARS += \

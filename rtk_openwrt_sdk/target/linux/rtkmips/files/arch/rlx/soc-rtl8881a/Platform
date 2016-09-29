@@ -1,0 +1,23 @@
+# 
+# rtl819xd
+#
+cflags-$(CONFIG_SOC_RTL819XD)	+=
+load-$(CONFIG_SOC_RTL819XD)		= 0x80000000
+
+# 
+# rtl819xdt
+#
+cflags-$(CONFIG_SOC_RTL819XDT)	+=
+load-$(CONFIG_SOC_RTL819XDT)	= 0x80000000
+
+# 
+# rtl89xxd
+#
+cflags-$(CONFIG_SOC_RTL89XXD)	+=
+load-$(CONFIG_SOC_RTL89XXD)		= 0x80000000
+
+# 
+# rtl8881a
+#
+cflags-$(CONFIG_SOC_RTL8881A)	+=
+load-$(CONFIG_SOC_RTL8881A)		= 0x80000000

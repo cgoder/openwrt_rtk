@@ -1,0 +1,23 @@
+#
+# Board Configuration
+#
+menu "Board Configuration"
+
+config RTL89XXD_BOARD_V100
+	bool "RTL89xxD V100"
+	select RTL_89XXD
+	select RTL819X_SPI_FLASH
+	select AUTO_PCIE_PHY_SCAN
+	select RTL_NETDEV_NO_PRIV
+	select RTK_VOIP_BOARD
+	select ARCH_BUS_USB
+	select BSP_ENABLE_USB
+	select USB_ARCH_HAS_EHCI
+	select USB_ARCH_HAS_OHCI
+	help
+		This enables support for Realtek RTL89xxD V100 board
+          
+endmenu
+
+config RTK_VOIP_BOARD
+	def_bool n

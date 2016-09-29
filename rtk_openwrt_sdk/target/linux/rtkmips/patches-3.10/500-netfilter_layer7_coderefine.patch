@@ -1,0 +1,146 @@
+--- a/net/netfilter/Kconfig
++++ b/net/netfilter/Kconfig
+@@ -1016,27 +1016,6 @@ config NETFILTER_XT_MATCH_IPVS
+ 
+ 	  If unsure, say N.
+ 
+-config NETFILTER_XT_MATCH_LAYER7
+-	tristate '"layer7" match support'
+-	depends on EXPERIMENTAL
+-	depends on NETFILTER_XTABLES
+-	depends on NETFILTER_ADVANCED
+-	depends on NF_CONNTRACK
+-	help
+-	  Say Y if you want to be able to classify connections (and their
+-	  packets) based on regular expression matching of their application
+-	  layer data.   This is one way to classify applications such as
+-	  peer-to-peer filesharing systems that do not always use the same
+-	  port.
+-
+-	  To compile it as a module, choose M here.  If unsure, say N.
+-
+-config NETFILTER_XT_MATCH_LAYER7_DEBUG
+-	bool 'Layer 7 debugging output'
+-	depends on NETFILTER_XT_MATCH_LAYER7
+-	help
+-	  Say Y to get lots of debugging output.
+-
+ config NETFILTER_XT_MATCH_LENGTH
+ 	tristate '"length" match support'
+ 	depends on NETFILTER_ADVANCED
+@@ -1231,6 +1210,20 @@ config NETFILTER_XT_MATCH_STATE
+ 
+ 	  To compile it as a module, choose M here.  If unsure, say N.
+ 
++config NETFILTER_XT_MATCH_LAYER7
++	tristate '"layer7" match support'
++	depends on NETFILTER_XTABLES
++	depends on NF_CONNTRACK
++    depends on NETFILTER_ADVANCED
++	help
++	  Say Y if you want to be able to classify connections (and their
++	  packets) based on regular expression matching of their applications
++	  layer data.   This is one way to classify applications such as
++	  peer-to-peer filesharing systems that do not always use the same
++	  port.
++
++	  To compile it as a module, choose M here.  If unsure, say N.
++
+ config NETFILTER_XT_MATCH_LAYER7_DEBUG
+ 	bool 'Layer 7 debugging output'
+ 	depends on NETFILTER_XT_MATCH_LAYER7
+--- a/net/netfilter/xt_layer7.c
++++ b/net/netfilter/xt_layer7.c
+@@ -35,6 +35,7 @@
+ #include <linux/proc_fs.h>
+ 
+ #include "regexp/regexp.c"
++#include <linux/seq_file.h>
+ 
+ MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Matthew Strait <quadong@users.sf.net>, Ethan Sommer <sommere@users.sf.net>");
+@@ -363,23 +364,6 @@ static int my_atoi(const char *s)
+ 	}
+ }
+ 
+-/* write out num_packets to userland. */
+-static int layer7_read_proc(char* page, char ** start, off_t off, int count,
+-                            int* eof, void * data)
+-{
+-	if(num_packets > 99 && net_ratelimit())
+-		printk(KERN_ERR "layer7: NOT REACHED. num_packets too big\n");
+-
+-	page[0] = num_packets/10 + '0';
+-	page[1] = num_packets%10 + '0';
+-	page[2] = '\n';
+-	page[3] = '\0';
+-
+-	*eof=1;
+-
+-	return 3;
+-}
+-
+ /* Read in num_packets from userland */
+ static int layer7_write_proc(struct file* file, const char* buffer,
+                              unsigned long count, void *data)
+@@ -414,6 +398,48 @@ static int layer7_write_proc(struct file
+ 	return count;
+ }
+ 
++
++/* write out num_packets to userland. */
++static int layer7_read_proc(struct seq_file *s, void *v)
++{
++	if(num_packets > 99 && net_ratelimit())
++		printk(KERN_ERR "layer7: NOT REACHED. num_packets too big\n");
++
++    /*Fix jwj: it may have issue.*/
++#if 1
++	seq_printf(s, "num_packets is %d\n", num_packets);
++#else
++	page[0] = num_packets/10 + '0';
++	page[1] = num_packets%10 + '0';
++	page[2] = '\n';
++	page[3] = '\0';
++
++	*eof=1;
++
++	return 3;
++#endif
++}
++
++int layer7_single_open(struct inode *inode, struct file *file)
++{
++        return(single_open(file, layer7_read_proc, NULL));
++}
++
++static ssize_t layer7_single_write(struct file * file, const char __user * userbuf,
++		     size_t count, loff_t * off)
++{
++	return layer7_write_proc(file, userbuf,count, off);
++}
++
++
++struct file_operations layer7_proc_fops = {
++        .open           = layer7_single_open,
++	 .write		= layer7_single_write,
++        .read           = seq_read,
++        .llseek         = seq_lseek,
++        .release        = single_release,
++};
++
+ static bool
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
+ match(const struct sk_buff *skbin, struct xt_action_param *par)
+@@ -664,9 +690,8 @@ static void layer7_cleanup_proc(void)
+ static void layer7_init_proc(void)
+ {
+ 	struct proc_dir_entry* entry;
+-	entry = create_proc_entry("layer7_numpackets", 0644, init_net.proc_net);
+-	entry->read_proc = layer7_read_proc;
+-	entry->write_proc = layer7_write_proc;
++	entry = proc_create_data("layer7_numpackets", 0644, init_net.proc_net,
++			 &layer7_proc_fops, NULL);
+ }
+ 
+ static int __init xt_layer7_init(void)

@@ -1,0 +1,11 @@
+diff -urN compat-orig/net/wireless/reg.c compat-patch/net/wireless/reg.c
+--- compat-orig/net/wireless/reg.c	2016-01-19 16:58:46.297046999 +0800
++++ compat-patch/net/wireless/reg.c	2016-01-19 16:58:23.129046999 +0800
+@@ -180,6 +180,7 @@
+ out:
+ 	return regd->dfs_region;
+ }
++EXPORT_SYMBOL(reg_get_dfs_region);
+ 
+ static void rcu_free_regdom(const struct ieee80211_regdomain *r)
+ {

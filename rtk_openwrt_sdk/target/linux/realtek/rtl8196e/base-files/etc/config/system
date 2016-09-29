@@ -1,0 +1,4 @@
+config system
+	option hostname rtl8196e
+	option timezone UTC
+

@@ -1,0 +1,31 @@
+#!/bin/sh
+if   [ -x /sbin/swconfig ]; then
+	uci batch <<EOF
+set network.eth0=switch
+set network.eth0.name=eth0
+set network.eth0.reset=1
+set network.eth0.enable_vlan=1
+set network.eth0_1=switch_vlan
+set network.eth0_1.device=eth0
+set network.eth0_1.vlan=1
+set network.eth0_1.ports="0 1 2 3 6t"
+set network.eth0_2=switch_vlan
+set network.eth0_2.device=eth0
+set network.eth0_2.vlan=2
+set network.eth0_2.ports="4 6t"
+EOF
+	HAS_SWITCH=1
+fi
+
+if [ -n "$HAS_SWITCH" ]; then
+	uci batch <<EOF
+set network.lan.ifname=eth0.1
+set network.wan=interface
+set network.wan.ifname=eth0.2
+set network.wan.proto=dhcp
+commit network
+EOF
+	HAS_SWITCH=1
+fi
+
+uci commit network

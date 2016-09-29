@@ -1,0 +1,56 @@
+if REALTEK
+source "arch/mips/realtek/Kconfig.legacy"
+choice
+	prompt "Realtek mips SoC selection"
+	default SOC_RTL8198C
+        help
+          Select Realtek MIPS SoC type.	
+	
+	config SOC_RTL8198C
+		bool "rtl8198c"
+		select MIPS_CPU_SCACHE
+                select SYS_SUPPORTS_SMP
+                select SYS_SUPPORTS_MIPS_CMP
+                select IRQ_GIC
+		select USB_ARCH_HAS_XHCI
+		select HW_HAS_PCI
+		select SYS_SUPPORTS_HIGHMEM
+endchoice
+
+choice
+        prompt "Develop platform selection"
+        default RTL_8198C_WRT
+        help
+          Select the platform.
+
+        config RTL_8198C_WRT
+                bool "8198C OpenWRT BSP"
+		select RTL_8198C_GW
+		select OPENWRT_SDK
+		select WRT_BARRIER_BREAKER
+		select RTK_XHCI_USB
+		select USB_XHCI_PLATFORM
+		select ARCH_REQUIRE_GPIOLIB
+                depends on SOC_RTL8198C
+
+endchoice
+
+config RTK_BOOTINFO_DUALIMAGE
+        bool "DualImage Support(OpenWRT SDK)"
+        default n
+comment "Second Bank Offset"
+        depends on RTK_BOOTINFO_DUALIMAGE
+config RTK_DUALIMAGE_FLASH_OFFSET
+        hex "flash offset"
+        depends on RTK_BOOTINFO_DUALIMAGE
+        default "0x400000"
+        help
+          offset of second bank, in most case it should be half of your flash size.
+
+config RTK_XHCI_USB
+	def_bool n
+
+config SPI_3to4BYTES_ADDRESS_SUPPORT
+	bool "SPI 32MB support from 3Byte to 4byte mapping"
+	default n
+endif

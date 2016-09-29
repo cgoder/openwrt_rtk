@@ -1,0 +1,390 @@
+diff -ruN before/fs/jffs2/file.c after/fs/jffs2/file.c
+--- before/fs/jffs2/file.c	2014-07-18 06:58:15.000000000 +0800
++++ after/fs/jffs2/file.c	2015-05-12 09:36:37.237487954 +0800
+@@ -79,6 +79,9 @@
+ 	.write_begin =	jffs2_write_begin,
+ 	.write_end =	jffs2_write_end,
+ };
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(jffs2_file_address_operations);
++#endif
+ 
+ static int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
+ {
+diff -ruN before/fs/splice.c after/fs/splice.c
+--- before/fs/splice.c	2015-03-13 17:42:13.488192600 +0800
++++ after/fs/splice.c	2015-07-06 17:24:02.278826906 +0800
+@@ -34,6 +34,13 @@
+ #include <linux/compat.h>
+ #include "internal.h"
+ 
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++#include <net/rtl/rtl_sendfile.h>
++struct rtl_sendfile_ops *rtl_sendfile_hook = NULL;
++unsigned int rtl_use_sendfile = 0x10;
++EXPORT_SYMBOL(rtl_sendfile_hook);
++#endif
++
+ /*
+  * Attempt to steal a page from a pipe buffer. This should perhaps go into
+  * a vm helper function, it's already simplified quite a bit by the
+@@ -813,6 +820,11 @@
+ int splice_from_pipe_feed(struct pipe_inode_info *pipe, struct splice_desc *sd,
+ 			  splice_actor *actor)
+ {
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	if(rtl_sendfile_hook)
++		return rtl_sendfile_hook->splice_from_pipe_feed(pipe, sd, actor);
++	else {
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ 	int ret;
+ 
+ 	while (pipe->nrbufs) {
+@@ -856,6 +868,9 @@
+ 	}
+ 
+ 	return 1;
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	}
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ }
+ EXPORT_SYMBOL(splice_from_pipe_feed);
+ 
+@@ -1103,6 +1118,10 @@
+ ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe, struct file *out,
+ 				loff_t *ppos, size_t len, unsigned int flags)
+ {
++#if 0	//#ifdef CONFIG_RTL_SENDFILE_PATCH
++	if (rtl_use_sendfile && rtl_sendfile_hook)
++		return splice_from_pipe(pipe, out, ppos, len, flags, rtl_sendfile_hook->pipe_to_sendpages);
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ 	return splice_from_pipe(pipe, out, ppos, len, flags, pipe_to_sendpage);
+ }
+ 
+@@ -1743,10 +1762,25 @@
+ {
+ 	struct fd in, out;
+ 	long error;
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	int run_normal = 0;
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ 
+ 	if (unlikely(!len))
+ 		return 0;
+ 
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	if (rtl_sendfile_hook) {
++		error = rtl_sendfile_hook->splice(fd_in, off_out, fd_out, len, &run_normal);
++
++		if ( run_normal == 1 )
++			goto splice_normal;
++		else
++			return error;
++	}
++splice_normal:
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
++
+ 	error = -EBADF;
+ 	in = fdget(fd_in);
+ 	if (in.file) {
+diff -ruN before/include/linux/fs.h after/include/linux/fs.h
+--- before/include/linux/fs.h	2015-03-20 13:24:14.912139900 +0800
++++ after/include/linux/fs.h	2015-05-08 10:48:41.430695514 +0800
+@@ -1286,6 +1286,11 @@
+ 
+ 	struct sb_writers	s_writers;
+ 
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	int			s_frozen;
++	wait_queue_head_t	s_wait_unfrozen;
++#endif
++
+ 	char s_id[32];				/* Informational name */
+ 	u8 s_uuid[16];				/* UUID */
+ 
+diff -ruN before/include/linux/skbuff.h after/include/linux/skbuff.h
+--- before/include/linux/skbuff.h	2015-03-23 19:45:51.658539200 +0800
++++ after/include/linux/skbuff.h	2015-05-08 10:49:38.709354378 +0800
+@@ -2459,6 +2459,12 @@
+ extern int	       skb_copy_datagram_iovec(const struct sk_buff *from,
+ 					       int offset, struct iovec *to,
+ 					       int size);
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++//Patch by G2NAS:enhance performance from socket to file
++extern int             skb_copy_datagram_to_kernel_iovec(const struct sk_buff *from,
++                                               int offset, struct iovec *to,
++                                               int size);
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ extern int	       skb_copy_and_csum_datagram_iovec(struct sk_buff *skb,
+ 							int hlen,
+ 							struct iovec *iov);
+diff -ruN before/include/linux/socket.h after/include/linux/socket.h
+--- before/include/linux/socket.h	2015-03-23 19:45:53.816685500 +0800
++++ after/include/linux/socket.h	2015-05-08 10:50:16.068235732 +0800
+@@ -254,6 +254,10 @@
+ #define MSG_EOF         MSG_FIN
+ 
+ #define MSG_FASTOPEN	0x20000000	/* Send data in TCP SYN */
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++#define MSG_KERNSPACE                   0x10000
++#define MSG_NOCATCHSIGNAL               0x20000
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ #define MSG_CMSG_CLOEXEC 0x40000000	/* Set close_on_exit for file
+ 					   descriptor received through
+ 					   SCM_RIGHTS */
+diff -ruN before/include/linux/splice.h after/include/linux/splice.h
+--- before/include/linux/splice.h	2015-03-23 19:45:55.858006000 +0800
++++ after/include/linux/splice.h	2015-05-08 10:51:00.461462952 +0800
+@@ -92,4 +92,14 @@
+ extern void spd_release_page(struct splice_pipe_desc *, unsigned int);
+ 
+ extern const struct pipe_buf_operations page_cache_pipe_buf_ops;
++
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++extern unsigned int rtl_use_sendfile;
++extern ssize_t rtl_splice(int fd_in, loff_t *off_in, int fd_out, 
++					size_t len, int *run_normal);
++extern int rtl_splice_from_pipe_feed(struct pipe_inode_info *pipe, struct splice_desc *sd,
++					splice_actor *actor);
++extern int pipe_to_sendpages(struct pipe_inode_info *pipe,
++					struct pipe_buffer *buf, struct splice_desc *sd);
++#endif
+ #endif
+diff -ruN before/include/net/tcp.h after/include/net/tcp.h
+--- before/include/net/tcp.h	2014-07-18 06:58:15.000000000 +0800
++++ after/include/net/tcp.h	2015-05-08 10:51:56.181403975 +0800
+@@ -1587,5 +1587,8 @@
+ 
+ extern void tcp_v4_init(void);
+ extern void tcp_init(void);
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++extern void rtl_tcp_ctl_init(void);
++#endif
+ 
+ #endif	/* _TCP_H */
+diff -ruN before/mm/page-writeback.c after/mm/page-writeback.c
+--- before/mm/page-writeback.c	2014-07-18 06:58:15.000000000 +0800
++++ after/mm/page-writeback.c	2015-05-12 09:32:55.845523319 +0800
+@@ -60,7 +60,12 @@
+  * After a CPU has dirtied this many pages, balance_dirty_pages_ratelimited
+  * will look to see if it needs to force writeback or throttling.
+  */
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static long ratelimit_pages = 32;
++#else
++long ratelimit_pages = 32;
++EXPORT_SYMBOL(ratelimit_pages);
++#endif
+ 
+ /* The following parameters are exported via /proc/sys/vm */
+ 
+@@ -1200,8 +1205,13 @@
+  * If we're over `background_thresh' then the writeback threads are woken to
+  * perform some writeout.
+  */
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static void balance_dirty_pages(struct address_space *mapping,
+ 				unsigned long pages_dirtied)
++#else
++void balance_dirty_pages(struct address_space *mapping,
++				unsigned long pages_dirtied)
++#endif
+ {
+ 	unsigned long nr_reclaimable;	/* = file_dirty + unstable_nfs */
+ 	unsigned long bdi_reclaimable;
+@@ -1420,6 +1430,9 @@
+ 	if (nr_reclaimable > background_thresh)
+ 		bdi_start_background_writeback(bdi);
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(balance_dirty_pages);
++#endif
+ 
+ void set_page_dirty_balance(struct page *page, int page_mkwrite)
+ {
+diff -ruN before/net/ipv4/af_inet.c after/net/ipv4/af_inet.c
+--- before/net/ipv4/af_inet.c	2014-07-18 06:58:15.000000000 +0800
++++ after/net/ipv4/af_inet.c	2015-05-11 20:32:16.921537182 +0800
+@@ -172,7 +172,11 @@
+  *	Automatically bind an unbound socket.
+  */
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static int inet_autobind(struct sock *sk)
++#else
++int inet_autobind(struct sock *sk)
++#endif
+ {
+ 	struct inet_sock *inet;
+ 	/* We may need to bind the socket. */
+@@ -188,6 +192,9 @@
+ 	release_sock(sk);
+ 	return 0;
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(inet_autobind);
++#endif
+ 
+ /*
+  *	Move a socket into listening state.
+diff -ruN before/net/ipv4/tcp.c after/net/ipv4/tcp.c
+--- before/net/ipv4/tcp.c	2014-07-18 06:58:15.000000000 +0800
++++ after/net/ipv4/tcp.c	2015-05-12 09:41:33.190865852 +0800
+@@ -276,6 +276,9 @@
+ #include <net/ip.h>
+ #include <net/netdma.h>
+ #include <net/sock.h>
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++#include <net/rtl/rtl_sendfile.h>
++#endif
+ 
+ #include <asm/uaccess.h>
+ #include <asm/ioctls.h>
+@@ -584,18 +587,36 @@
+ }
+ EXPORT_SYMBOL(tcp_ioctl);
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static inline void tcp_mark_push(struct tcp_sock *tp, struct sk_buff *skb)
++#else
++inline void tcp_mark_push(struct tcp_sock *tp, struct sk_buff *skb)
++#endif
+ {
+ 	TCP_SKB_CB(skb)->tcp_flags |= TCPHDR_PSH;
+ 	tp->pushed_seq = tp->write_seq;
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(tcp_mark_push);
++#endif
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static inline bool forced_push(const struct tcp_sock *tp)
++#else
++inline bool forced_push(const struct tcp_sock *tp)
++#endif
+ {
+ 	return after(tp->write_seq, tp->pushed_seq + (tp->max_window >> 1));
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(forced_push);
++#endif
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static inline void skb_entail(struct sock *sk, struct sk_buff *skb)
++#else
++inline void skb_entail(struct sock *sk, struct sk_buff *skb)
++#endif
+ {
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
+@@ -611,6 +632,9 @@
+ 	if (tp->nonagle & TCP_NAGLE_PUSH)
+ 		tp->nonagle &= ~TCP_NAGLE_PUSH;
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(skb_entail);
++#endif
+ 
+ static inline void tcp_mark_urg(struct tcp_sock *tp, int flags)
+ {
+@@ -618,8 +642,13 @@
+ 		tp->snd_up = tp->write_seq;
+ }
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static inline void tcp_push(struct sock *sk, int flags, int mss_now,
+ 			    int nonagle)
++#else
++inline void tcp_push(struct sock *sk, int flags, int mss_now,
++			    int nonagle)
++#endif
+ {
+ 	if (tcp_send_head(sk)) {
+ 		struct tcp_sock *tp = tcp_sk(sk);
+@@ -632,6 +661,9 @@
+ 					  (flags & MSG_MORE) ? TCP_NAGLE_CORK : nonagle);
+ 	}
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(tcp_push);
++#endif
+ 
+ static int tcp_splice_data_recv(read_descriptor_t *rd_desc, struct sk_buff *skb,
+ 				unsigned int offset, size_t len)
+@@ -778,6 +810,9 @@
+ 	}
+ 	return NULL;
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(sk_stream_alloc_skb);
++#endif
+ 
+ static unsigned int tcp_xmit_size_goal(struct sock *sk, u32 mss_now,
+ 				       int large_allowed)
+@@ -826,7 +861,11 @@
+ 	return max(xmit_size_goal, mss_now);
+ }
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
++#else
++int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
++#endif
+ {
+ 	int mss_now;
+ 
+@@ -835,6 +874,9 @@
+ 
+ 	return mss_now;
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(tcp_send_mss);
++#endif
+ 
+ static ssize_t do_tcp_sendpages(struct sock *sk, struct page *page, int offset,
+ 				size_t size, int flags)
+@@ -1867,6 +1909,12 @@
+ 			} else
+ #endif
+ 			{
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++				if ((rtl_use_sendfile & 0x10) && rtl_sendfile_hook) // G2NAS enhancement
++					err = rtl_sendfile_hook->skb_copy_datagram_to_kernel_iovec(skb, offset,
++							msg->msg_iov, used);
++				else
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ 				err = skb_copy_datagram_iovec(skb, offset,
+ 						msg->msg_iov, used);
+ 				if (err) {
+@@ -3466,4 +3514,8 @@
+ 	tcp_register_congestion_control(&tcp_reno);
+ 
+ 	tcp_tasklet_init();
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	if (rtl_sendfile_hook)
++		rtl_sendfile_hook->tcp_ctl_init();
++#endif /* CONFIG_RTL_SENDFILE_PATCH */
+ }
+diff -ruN before/net/ipv4/tcp_output.c after/net/ipv4/tcp_output.c
+--- before/net/ipv4/tcp_output.c	2015-05-12 09:35:26.887830743 +0800
++++ after/net/ipv4/tcp_output.c	2015-05-12 09:37:47.750507817 +0800
+@@ -2073,6 +2073,9 @@
+ 			   sk_gfp_atomic(sk, GFP_ATOMIC)))
+ 		tcp_check_probe_timer(sk);
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(__tcp_push_pending_frames);
++#endif
+ 
+ /* Send _single_ skb sitting at the send head. This function requires
+  * true push pending frames to setup probe timer etc.
+@@ -2085,6 +2088,9 @@
+ 
+ 	tcp_write_xmit(sk, mss_now, TCP_NAGLE_PUSH, 1, sk->sk_allocation);
+ }
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++EXPORT_SYMBOL(tcp_push_one);
++#endif
+ 
+ /* This function returns the amount that we can raise the
+  * usable window based on the following constraints

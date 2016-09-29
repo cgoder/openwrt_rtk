@@ -1,0 +1,74 @@
+--- a/tools/hciattach.c
++++ b/tools/hciattach.c
+@@ -47,7 +47,6 @@
+ #include <bluetooth/hci_lib.h>
+ 
+ #include "hciattach.h"
+-
+ struct uart_t {
+ 	char *type;
+ 	int  m_id;
+@@ -1044,6 +1043,22 @@ static int bcm2035(int fd, struct uart_t
+ 	return 0;
+ }
+ 
++//Realtek_add_start
++//add realtek Bluetooth init and post function.
++static int realtek_init(int fd, struct uart_t *u, struct termios *ti)
++{
++
++	fprintf(stderr, "Realtek Bluetooth init uart with init speed:%d, final_speed:%d, type:HCI UART %s\n", u->init_speed, u->speed, (u->proto == HCI_UART_H4)? "H4":"H5" );
++	return rtk_init(fd, u->proto, u->speed, ti);
++} 
++
++static int realtek_post(int fd, struct uart_t *u, struct termios *ti)
++{
++	fprintf(stderr, "Realtek Bluetooth post process\n");
++	return rtk_post(fd, u->proto, ti); 
++}
++//Realtek_add_end
++
+ struct uart_t uart[] = {
+ 	{ "any",        0x0000, 0x0000, HCI_UART_H4,   115200, 115200,
+ 				FLOW_CTL, DISABLE_PM, NULL, NULL     },
+@@ -1139,6 +1154,15 @@ struct uart_t uart[] = {
+ 	/* Broadcom BCM2035 */
+ 	{ "bcm2035",    0x0A5C, 0x2035, HCI_UART_H4,   115200, 460800,
+ 				FLOW_CTL, DISABLE_PM, NULL, bcm2035  },
++	//Realtek_add_start
++	/* Realtek Bluetooth H4*/
++	/* H4 will set 115200 baudrate and flow control enable by default*/
++	{ "rtk_h4", 	0x0000, 0x0000, HCI_UART_H4,  115200,  115200, FLOW_CTL, DISABLE_PM, NULL,realtek_init, realtek_post},
++	/* Realtek Bluetooth H5*/
++	/* H5 will set 921600 baudrate and flow control disable by default */
++	/* H5 will be realtek's recommanded protocol */
++	{ "rtk_h5", 	0x0000, 0x0000, HCI_UART_3WIRE, 921600,921600, 0,		 DISABLE_PM,NULL, realtek_init, realtek_post},
++	//Realtek_add_end
+ 
+ 	/* Broadcom BCM43XX */
+ 	{ "bcm43xx",    0x0000, 0x0000, HCI_UART_H4,   115200, 3000000,
+@@ -1280,6 +1304,8 @@ static void usage(void)
+ 	printf("\thciattach -l\n");
+ }
+ 
++
++#include "hciattach_rtk.c"
+ int main(int argc, char *argv[])
+ {
+ 	struct uart_t *u = NULL;
+--- a/tools/hciattach.h
++++ b/tools/hciattach.h
+@@ -56,6 +56,13 @@ int bgb2xx_init(int dd, bdaddr_t *bdaddr
+ int ath3k_init(int fd, int speed, int init_speed, char *bdaddr,
+ 						struct termios *ti);
+ int ath3k_post(int fd, int pm);
++
++//Realtek_add_start
++//add realtek init and post process for realtek Bluetooth chip
++int rtk_init(int fd, int proto, int speed, struct termios *ti);
++int rtk_post(int fd, int proto, struct termios *ti);
++//Realtek_add_end
++
+ int qualcomm_init(int fd, int speed, struct termios *ti, const char *bdaddr);
+ int intel_init(int fd, int init_speed, int *speed, struct termios *ti);
+ int bcm43xx_init(int fd, int speed, struct termios *ti, const char *bdaddr);

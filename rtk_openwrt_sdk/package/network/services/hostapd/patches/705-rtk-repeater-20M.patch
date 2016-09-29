@@ -1,0 +1,14 @@
+diff -urN old/hostapd/ctrl_iface.c patch/hostapd/ctrl_iface.c
+--- old/hostapd/ctrl_iface.c	2015-10-12 12:11:13.405611300 +0800
++++ patch/hostapd/ctrl_iface.c	2015-10-14 13:22:27.620881800 +0800
+@@ -196,6 +196,10 @@
+ 			conf->ht_capab &= atoi(val);
+ 		else if ((val = get_option(opt, "sec_chan=")))
+ 			conf->secondary_channel = atoi(val);
++			if(conf->secondary_channel == 0 && conf->ieee80211ac == 1) {
++				conf->vht_oper_chwidth = VHT_CHANWIDTH_USE_HT;
++				conf->vht_oper_centr_freq_seg0_idx = 0;
++			}
+ 		else if ((val = get_option(opt, "hw_mode=")))
+ 			conf->hw_mode = atoi(val);
+ 		else if ((val = get_option(opt, "ieee80211n="))) {

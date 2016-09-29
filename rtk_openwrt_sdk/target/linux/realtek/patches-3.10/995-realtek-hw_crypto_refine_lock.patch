@@ -1,0 +1,82 @@
+Index: linux-3.10.49/net/ipv4/ah4.c
+===================================================================
+--- linux-3.10.49.orig/net/ipv4/ah4.c
++++ linux-3.10.49/net/ipv4/ah4.c
+@@ -169,10 +169,10 @@ static int ah_output(struct xfrm_state *
+ 	ahp = x->data;
+ 	ahash = ahp->ahash;
+ 
++	SMP_LOCK_BH_IPSEC;
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-	SMP_LOCK_IPSEC;
+ 	skb_push(skb, -skb_network_offset(skb));
+ 	ah = ip_auth_hdr(skb);
+ 	ihl = ip_hdrlen(skb);
+@@ -251,7 +251,7 @@ static int ah_output(struct xfrm_state *
+ out_free:
+ 	kfree(iph);
+ out:
+-	SMP_UNLOCK_IPSEC;
++	SMP_UNLOCK_BH_IPSEC;
+ 	return err;
+ }
+ 
+@@ -307,6 +307,8 @@ static int ah_input(struct xfrm_state *x
+ 	struct ah_data *ahp;
+ 	int err = -ENOMEM;
+ 
++	
++	SMP_LOCK_IPSEC;
+ 	if (!pskb_may_pull(skb, sizeof(*ah)))
+ 		goto out;
+ 
+@@ -341,7 +343,6 @@ static int ah_input(struct xfrm_state *x
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-	SMP_LOCK_IPSEC;
+ 	ah = (struct ip_auth_hdr *)skb->data;
+ 	iph = ip_hdr(skb);
+ 	ihl = ip_hdrlen(skb);
+Index: linux-3.10.49/net/ipv4/esp4.c
+===================================================================
+--- linux-3.10.49.orig/net/ipv4/esp4.c
++++ linux-3.10.49/net/ipv4/esp4.c
+@@ -147,7 +147,7 @@ static int esp_output(struct xfrm_state 
+ 	__be32 *seqhi;
+ 
+ 	/* skb is pure payload to encrypt */
+-	SMP_LOCK_IPSEC;
++	SMP_LOCK_BH_IPSEC;
+ 	esp = x->data;
+ 	aead = esp->aead;
+ 	alen = crypto_aead_authsize(aead);
+@@ -282,7 +282,7 @@ static int esp_output(struct xfrm_state 
+ 	kfree(tmp);
+ 
+ error:
+-	SMP_UNLOCK_IPSEC;
++	SMP_UNLOCK_BH_IPSEC;
+ 	return err;
+ }
+ 
+@@ -401,7 +401,8 @@ static int esp_input(struct xfrm_state *
+ 	struct scatterlist *sg;
+ 	struct scatterlist *asg;
+ 	int err = -EINVAL;
+-
++	
++	SMP_LOCK_IPSEC;
+ 	if (!pskb_may_pull(skb, sizeof(*esph) + crypto_aead_ivsize(aead)))
+ 		goto out;
+ 
+@@ -411,7 +412,6 @@ static int esp_input(struct xfrm_state *
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-	SMP_LOCK_IPSEC;
+ 	assoclen = sizeof(*esph);
+ 	sglists = 1;
+ 	seqhilen = 0;

@@ -1,0 +1,95 @@
+diff -urN a/arch/mips/kernel/traps.c b/arch/mips/kernel/traps.c
+--- a/arch/mips/kernel/traps.c	2016-09-05 19:45:01.699198125 +0800
++++ b/arch/mips/kernel/traps.c	2016-09-05 19:44:40.895198944 +0800
+@@ -380,6 +380,12 @@
+ 	printk("%s[#%d]:\n", str, ++die_counter);
+ 	show_registers(regs);
+ 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
++#if defined(CONFIG_OPENWRT_SDK) && defined(CONFIG_RTL819X_WDT)
++        {
++        extern void bsp_reboot(void);
++        bsp_reboot();
++        }
++#endif
+ 	raw_spin_unlock_irq(&die_lock);
+ 
+ 	oops_exit();
+@@ -891,6 +897,16 @@
+ 	}
+ 
+ 	do_trap_or_bp(regs, bcode, "Break");
++#if defined(CONFIG_OPENWRT_SDK) && defined(CONFIG_RTL819X_WDT)
++        if (bcode == 7){ // divided by zero
++                die("Oops", regs);
++                {
++        	extern void bsp_reboot(void);
++        	bsp_reboot();
++        	}
++        }
++#endif
++
+ 	return;
+ 
+ out_sigsegv:
+diff -urN a/kernel/exit.c b/kernel/exit.c
+--- a/kernel/exit.c	2016-09-05 19:34:56.055221983 +0800
++++ b/kernel/exit.c	2016-09-06 10:36:12.677091736 +0800
+@@ -758,6 +758,13 @@
+ 		 */
+ 		tsk->flags |= PF_EXITPIDONE;
+ 		set_current_state(TASK_UNINTERRUPTIBLE);
++#if defined(CONFIG_OPENWRT_SDK) && defined(CONFIG_RTL819X_WDT)
++        	{
++        	extern void bsp_reboot(void);
++		printk("Fixing recursive fault but reboot is needed!\n");
++        	bsp_reboot();
++        	}
++#endif
+ 		schedule();
+ 	}
+ 
+@@ -770,10 +777,17 @@
+ 	raw_spin_unlock_wait(&tsk->pi_lock);
+ 
+ 	if (unlikely(in_atomic()))
++	{
+ 		printk(KERN_INFO "note: %s[%d] exited with preempt_count %d\n",
+ 				current->comm, task_pid_nr(current),
+ 				preempt_count());
+-
++	#if defined(CONFIG_OPENWRT_SDK) && defined(CONFIG_RTL819X_WDT)
++        	{
++        	extern void bsp_reboot(void);
++        	bsp_reboot();
++        	}
++	#endif
++	}
+ 	acct_update_integrals(tsk);
+ 	/* sync mm's RSS info before statistics gathering */
+ 	if (tsk->mm)
+diff -urN a/kernel/rcutree.c b/kernel/rcutree.c
+--- a/kernel/rcutree.c	2016-09-05 19:34:56.055221983 +0800
++++ b/kernel/rcutree.c	2016-09-05 20:43:20.295060304 +0800
+@@ -977,7 +977,7 @@
+ 
+ 	set_need_resched();  /* kick ourselves to get things going. */
+ }
+-#if !defined(CONFIG_RTL_8198C)
++#if 1//!defined(CONFIG_RTL_8198C)
+ static void check_cpu_stall(struct rcu_state *rsp, struct rcu_data *rdp)
+ {
+ 	unsigned long j;
+@@ -993,7 +993,12 @@
+ 	    (ACCESS_ONCE(rnp->qsmask) & rdp->grpmask) && ULONG_CMP_GE(j, js)) {
+ 		/* We haven't checked in, so go dump stack. */
+ 		print_cpu_stall(rsp);
+-
++#if defined(CONFIG_OPENWRT_SDK) && defined(CONFIG_RTL819X_WDT)
++        	{
++        	extern void bsp_reboot(void);
++        	bsp_reboot();
++        	}
++#endif
+ 	} else if (rcu_gp_in_progress(rsp) &&
+ 		   ULONG_CMP_GE(j, js + RCU_STALL_RAT_DELAY)) {
+ 		/* They had a few time units to dump stack, so complain. */

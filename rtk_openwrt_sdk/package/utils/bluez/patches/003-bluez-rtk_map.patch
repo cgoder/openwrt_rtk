@@ -1,0 +1,55 @@
+--- a/obexd/client/map.c
++++ b/obexd/client/map.c
+@@ -1539,10 +1539,18 @@ static DBusMessage *map_list_messages(DB
+ 
+ 	dbus_message_iter_get_basic(&args, &folder);
+ 
++	/* set the default values */
+ 	apparam = g_obex_apparam_set_uint16(NULL, MAP_AP_MAXLISTCOUNT,
+ 							DEFAULT_COUNT);
+ 	apparam = g_obex_apparam_set_uint16(apparam, MAP_AP_STARTOFFSET,
+ 							DEFAULT_OFFSET);
++	apparam = g_obex_apparam_set_uint8(apparam, MAP_AP_FILTERREADSTATUS, 0);
++	apparam = g_obex_apparam_set_uint8(apparam, MAP_AP_SUBJECTLENGTH, 128);
++	apparam = g_obex_apparam_set_uint32(apparam, MAP_AP_PARAMETERMASK, 0);
++	apparam = g_obex_apparam_set_uint8(apparam, MAP_AP_FILTERMESSAGETYPE,
++			0x0c);
++	apparam = g_obex_apparam_set_uint8(apparam, MAP_AP_FILTERPRIORITY,
++			0x00);
+ 
+ 	dbus_message_iter_next(&args);
+ 
+@@ -1840,6 +1848,7 @@ static void map_msg_remove(void *data)
+ 	g_free(path);
+ }
+ 
++#if 0
+ static void map_handle_new_message(struct map_data *map,
+ 							struct map_event *event)
+ {
+@@ -1971,12 +1980,13 @@ static bool set_notification_registratio
+ 
+ 	return false;
+ }
++#endif
+ 
+ static void map_free(void *data)
+ {
+ 	struct map_data *map = data;
+ 
+-	set_notification_registration(map, false);
++	/* set_notification_registration(map, false); */
+ 
+ 	obc_session_unref(map->session);
+ 	g_hash_table_unref(map->messages);
+@@ -2024,7 +2034,9 @@ static int map_probe(struct obc_session
+ 
+ 	DBG("%s, instance id %d", path, map->mas_instance_id);
+ 
+-	set_notification_registration(map, true);
++	/* FIXME: some phones doesn't support mns well.
++	 * Notification may cause the phone BT to crash. */
++	/* set_notification_registration(map, true); */
+ 
+ 	if (!g_dbus_register_interface(conn, path, MAP_INTERFACE, map_methods,
+ 					NULL, NULL, map, map_free)) {

@@ -1,0 +1,115 @@
+--- a/net/sched/sch_api.c
++++ b/net/sched/sch_api.c
+@@ -34,6 +34,9 @@
+ #include <net/sock.h>
+ #include <net/netlink.h>
+ #include <net/pkt_sched.h>
++#if defined (CONFIG_RTL_QOS_SYNC_SUPPORT)
++#include <net/rtl/features/rtl_ps_hooks.h>
++#endif
+ 
+ static int qdisc_notify(struct net *net, struct sk_buff *oskb,
+ 			struct nlmsghdr *n, u32 clid,
+@@ -1071,6 +1074,9 @@ static int tc_get_qdisc(struct sk_buff *
+ 		err = qdisc_graft(dev, p, skb, n, clid, NULL, q);
+ 		if (err != 0)
+ 			return err;
++		#if defined(CONFIG_RTL_QOS_SYNC_SUPPORT)
++		rtl_QosSyncTcHook(dev,0,0,(RTL_QOS_QUEUE_HOOK|RTL_QOS_DEL_PROCESS));
++		#endif
+ 	} else {
+ 		qdisc_notify(net, skb, n, clid, NULL, q);
+ 	}
+@@ -1231,7 +1237,10 @@ graft:
+ 			qdisc_destroy(q);
+ 		return err;
+ 	}
++#if defined(CONFIG_RTL_QOS_SYNC_SUPPORT)
+ 
++	rtl_QosSyncTcHook(dev,q,0,(RTL_QOS_QUEUE_HOOK|RTL_QOS_ADD_PROCESS));
++#endif
+ 	return 0;
+ }
+ 
+--- a/net/ipv4/netfilter/ip_tables.c
++++ b/net/ipv4/netfilter/ip_tables.c
+@@ -30,6 +30,9 @@
+ #include <linux/netfilter_ipv4/ip_tables.h>
+ #include <net/netfilter/nf_log.h>
+ #include "../../netfilter/xt_repldata.h"
++#if defined (CONFIG_RTL_HW_QOS_SUPPORT)
++extern int rtl_hwQosIptables_Hook(struct xt_table * table);
++#endif
+ 
+ MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
+@@ -1303,6 +1306,10 @@ __do_replace(struct net *net, const char
+ 		net_warn_ratelimited("iptables: counters copy to user failed while replacing table\n");
+ 	}
+ 	vfree(counters);
++	
++#if defined (CONFIG_RTL_HW_QOS_SUPPORT)	
++	rtl_hwQosIptables_Hook(t);
++#endif
+ 	xt_table_unlock(t);
+ 	return ret;
+ 
+--- a/net/sched/cls_api.c
++++ b/net/sched/cls_api.c
+@@ -29,6 +29,9 @@
+ #include <net/netlink.h>
+ #include <net/pkt_sched.h>
+ #include <net/pkt_cls.h>
++#if defined (CONFIG_RTL_QOS_SYNC_SUPPORT)
++#include <net/rtl/features/rtl_ps_hooks.h>
++#endif
+ 
+ /* The list of all installed classifier types */
+ 
+@@ -329,6 +332,9 @@ replay:
+ 			*back = tp;
+ 			spin_unlock_bh(root_lock);
+ 		}
++#if defined (CONFIG_RTL_QOS_SYNC_SUPPORT)
++		 rtl_QosSyncTcHook(dev, NULL,parent,(RTL_QOS_FILTER_HOOK|RTL_QOS_ADD_PROCESS));
++#endif
+ 		tfilter_notify(net, skb, n, tp, fh, RTM_NEWTFILTER);
+ 	} else {
+ 		if (tp_created)
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -499,6 +499,10 @@ struct sk_buff {
+     __u32 pppoe_flag;
+     struct net_device       *rx_dev;
+ #endif
++
++#if defined(CONFIG_OPENWRT_SDK)
++	__u32 bypass_connmark;
++#endif
+ 	union {
+ 		__u32		mark;
+ 		__u32		dropcount;
+--- a/net/netfilter/xt_connmark.c
++++ b/net/netfilter/xt_connmark.c
+@@ -48,6 +48,11 @@ connmark_tg(struct sk_buff *skb, const s
+ 	if (ct == NULL)
+ 		return XT_CONTINUE;
+ 
++#if defined(CONFIG_OPENWRT_SDK)
++        if (skb->bypass_connmark == 1)
++		return XT_CONTINUE;
++#endif
++
+ 	switch (info->mode) {
+ 	case XT_CONNMARK_SET:
+ 		newmark = (ct->mark & ~info->ctmask) ^ info->ctmark;
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -58,6 +58,7 @@ config IP_ADVANCED_ROUTER
+ config RTL_IPTABLES_FAST_PATH
+         bool "Realtek IPTables Fast Path"
+         default n
++		select RTL_QOS_SYNC_SUPPORT
+ 
+ config FAST_PATH_MODULE
+         bool "Realtek IPTables Fast Path Module"

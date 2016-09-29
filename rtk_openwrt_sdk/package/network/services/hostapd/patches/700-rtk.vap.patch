@@ -1,0 +1,82 @@
+diff -urN old/src/drivers/driver_nl80211.c patch/src/drivers/driver_nl80211.c
+--- old/src/drivers/driver_nl80211.c	2014-10-20 17:15:17.000000000 +0800
++++ patch/src/drivers/driver_nl80211.c	2014-11-04 11:12:27.000000000 +0800
+@@ -2488,6 +2488,22 @@
+ 	wpa_supplicant_event(drv->ctx, EVENT_SIGNAL_CHANGE, &ed);
+ }
+ 
++#if 1 //wrt-vap
++struct i802_bss* get_bss_by_ifindex(struct wpa_driver_nl80211_data *drv, int ifindex)
++{
++	struct i802_bss *bss;
++	int i = 0;
++
++	for (bss = drv->first_bss; bss; bss = bss->next) 
++	{
++		wpa_printf(MSG_INFO, " +++ %s idx = (%d %d)\n", __FUNCTION__, ifindex,  bss->ifindex);
++		if(bss->ifindex == ifindex)
++			return bss;
++	}
++
++	return NULL;
++}
++#endif
+ 
+ static void nl80211_new_station_event(struct wpa_driver_nl80211_data *drv,
+ 				      struct nlattr **tb)
+@@ -2495,6 +2511,15 @@
+ 	u8 *addr;
+ 	union wpa_event_data data;
+ 
++#if 1 //wrt-vap
++	wpa_printf(MSG_INFO, " +++ nl80211_new_station_event, drv(ctx) = 0x%x(0x%x) \n", drv, drv->ctx);
++	wpa_printf(MSG_INFO, "ssid = %s addr = %02x:%02x:%02x:%02x:%02x:%02x \n", 
++		drv->ssid, 
++		drv->bssid[0], drv->bssid[1], drv->bssid[2], 
++		drv->bssid[3], drv->bssid[4], drv->bssid[5]);
++#endif 
++
++
+ 	if (tb[NL80211_ATTR_MAC] == NULL)
+ 		return;
+ 	addr = nla_data(tb[NL80211_ATTR_MAC]);
+@@ -2508,6 +2533,24 @@
+ 			ies_len = nla_len(tb[NL80211_ATTR_IE]);
+ 		}
+ 		wpa_hexdump(MSG_DEBUG, "nl80211: Assoc Req IEs", ies, ies_len);
++
++
++#if 1 //wrt-vap
++		if (tb[NL80211_ATTR_IFINDEX]) {
++			int ifindex = nla_get_u32(tb[NL80211_ATTR_IFINDEX]);
++			wpa_printf(MSG_INFO, " +++ idx = ( %d, %d) at %s \n", drv->ifindex, ifindex, __FUNCTION__);
++			if (ifindex != drv->ifindex) {
++				struct i802_bss* bss_vap = get_bss_by_ifindex(drv, ifindex);
++				wpa_printf(MSG_INFO, " +++ bss_vap = 0x%x ctx = 0x%x \n", bss_vap, bss_vap->ctx);
++				if(bss_vap)
++				{
++					drv_event_assoc(bss_vap->ctx, addr, ies, ies_len, 0);
++					return;
++				}
++			}
++		}
++#endif
++
+ 		drv_event_assoc(drv->ctx, addr, ies, ies_len, 0);
+ 		return;
+ 	}
+@@ -10222,6 +10265,14 @@
+ 		drv->first_bss->next = new_bss;
+ 		if (drv_priv)
+ 			*drv_priv = new_bss;
++
++#if 1 //wrt-vap
++		wpa_printf(MSG_INFO, " +++ drv = 0x%x(0x%x) \n", drv, drv->ctx);
++		wpa_printf(MSG_INFO, " +++ new_bss = 0x%x bss_ctx = 0x%x 0x%x \n", new_bss, new_bss->ctx, bss_ctx);	
++		//new_bss->ctx = bss_ctx;
++#endif
++
++
+ 		nl80211_init_bss(new_bss);
+ 
+ 		/* Subscribe management frames for this WPA_IF_AP_BSS */

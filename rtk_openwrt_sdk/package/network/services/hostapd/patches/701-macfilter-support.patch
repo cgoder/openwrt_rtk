@@ -1,0 +1,12 @@
+diff -urN hostapd-2014-06-03.1_orig/src/drivers/driver_nl80211.c hostapd-2014-06-03.1_patch/src/drivers/driver_nl80211.c
+--- hostapd-2014-06-03.1_orig/src/drivers/driver_nl80211.c	2014-11-07 12:41:30.000000000 +0800
++++ hostapd-2014-06-03.1_patch/src/drivers/driver_nl80211.c	2014-11-07 12:42:01.000000000 +0800
+@@ -3809,7 +3809,7 @@
+ 
+ 	if (tb[NL80211_ATTR_MAC_ACL_MAX])
+ 		capa->max_acl_mac_addrs =
+-			nla_get_u8(tb[NL80211_ATTR_MAC_ACL_MAX]);
++			nla_get_u32(tb[NL80211_ATTR_MAC_ACL_MAX]);
+ 
+ 	wiphy_info_supported_iftypes(info, tb[NL80211_ATTR_SUPPORTED_IFTYPES]);
+ 	wiphy_info_iface_comb(info, tb[NL80211_ATTR_INTERFACE_COMBINATIONS]);

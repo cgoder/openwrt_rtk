@@ -1,0 +1,748 @@
+Index: linux-3.10.49/drivers/crypto/Kconfig
+===================================================================
+--- linux-3.10.49.orig/drivers/crypto/Kconfig
++++ linux-3.10.49/drivers/crypto/Kconfig
+@@ -387,4 +387,35 @@ config CRYPTO_DEV_ATMEL_SHA
+ 	  To compile this driver as a module, choose M here: the module
+ 	  will be called atmel-sha.
+ 
++config CRYPTO_DEV_REALTEK
++	tristate "Driver Realtek Crypto Engine"
++	select CRYPTO_HMAC
++	select CRYPTO_HASH
++	select CRYPTO_ALGAPI
++	select CRYPTO_BLKCIPHER
++	select CRYPTO_CBC
++	select CRYPTO_CTR
++	select CRYPTO_ECB
++	select CRYPTO_MD5
++	select CRYPTO_SHA1
++	select CRYPTO_AES
++	select CRYPTO_DES
++	depends on RTL_8198C || RTL_8881A || RTL_8198
++	help
++	  This option allows you to have support for Realtek Crypto Engine.
++
++config CRYPTO_DEV_REALTEK_TEST
++	tristate "Driver Realtek Crypto Engine Test"
++	#select CRYPTO_TEST
++	depends on CRYPTO_DEV_REALTEK
++	help
++	  This option for Realtek Crypto Engine Internal Test.
++
++config CRYPTO_DEV_REALTEK_LINUX_SELFTEST
++    tristate "Realtek Crypto Engine Test by Linux Selftest case"
++    select CRYPTO_TEST
++    depends on CRYPTO_DEV_REALTEK && CRYPTO_DEV_REALTEK_TEST
++    help
++      This option for Realtek Crypto Engine Test by Linux Selftest case.
++
+ endif # CRYPTO_HW
+Index: linux-3.10.49/drivers/crypto/Makefile
+===================================================================
+--- linux-3.10.49.orig/drivers/crypto/Makefile
++++ linux-3.10.49/drivers/crypto/Makefile
+@@ -21,3 +21,4 @@ obj-$(CONFIG_CRYPTO_DEV_NX) += nx/
+ obj-$(CONFIG_CRYPTO_DEV_ATMEL_AES) += atmel-aes.o
+ obj-$(CONFIG_CRYPTO_DEV_ATMEL_TDES) += atmel-tdes.o
+ obj-$(CONFIG_CRYPTO_DEV_ATMEL_SHA) += atmel-sha.o
++obj-$(CONFIG_CRYPTO_DEV_REALTEK) += realtek/
+Index: linux-3.10.49/crypto/algboss.c
+===================================================================
+--- linux-3.10.49.orig/crypto/algboss.c
++++ linux-3.10.49/crypto/algboss.c
+@@ -217,7 +217,9 @@ static int cryptomgr_test(void *data)
+ #ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
+ 	goto skiptest;
+ #endif
+-
++#if defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
++	goto skiptest;
++#endif
+ 	if (type & CRYPTO_ALG_TESTED)
+ 		goto skiptest;
+ 
+Index: linux-3.10.49/crypto/cbc.c
+===================================================================
+--- linux-3.10.49.orig/crypto/cbc.c
++++ linux-3.10.49/crypto/cbc.c
+@@ -19,8 +19,14 @@
+ #include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++#include "../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
+ struct crypto_cbc_ctx {
+ 	struct crypto_cipher *child;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct rtl_cipher_ctx rtl_ctx;
++#endif
+ };
+ 
+ static int crypto_cbc_setkey(struct crypto_tfm *parent, const u8 *key,
+@@ -36,6 +42,11 @@ static int crypto_cbc_setkey(struct cryp
+ 	err = crypto_cipher_setkey(child, key, keylen);
+ 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
+ 				     CRYPTO_TFM_RES_MASK);
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	if (err == 0)
++		err = rtl_cipher_setkey(child, &ctx->rtl_ctx, key, keylen);
++#endif
++
+ 	return err;
+ }
+ 
+@@ -101,6 +112,40 @@ static int crypto_cbc_encrypt(struct blk
+ 	err = blkcipher_walk_virt(desc, &walk);
+ 
+ 	while ((nbytes = walk.nbytes)) {
++#ifdef CONFIG_CRYPTO_DEV_REALTEK_DBG
++		printk("%s: total=%d, walk=%d, blk=%d, src=%p, dst=%p\n", __FUNCTION__,
++			walk.total, walk.nbytes, crypto_cipher_blocksize(child),
++			walk.src.virt.addr, walk.dst.virt.addr
++		);
++#endif
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		if (ctx->rtl_ctx.mode >= 0)
++		{
++			int bsize = crypto_cipher_blocksize(child);
++			nbytes = rtl_cipher_crypt(child, 1,
++				&ctx->rtl_ctx, walk.src.virt.addr, nbytes,
++				walk.iv, walk.dst.virt.addr);
++
++			// cbc mode update
++			//memcpy(walk.iv, walk.dst.virt.addr,
++				//crypto_cipher_blocksize(child));
++			
++			if (walk.src.virt.addr == walk.dst.virt.addr)
++			{
++				walk.src.virt.addr += (walk.nbytes - nbytes);
++				memcpy(walk.iv, walk.src.virt.addr - bsize ,bsize);
++			}
++			else
++			{
++				walk.src.virt.addr += (walk.nbytes - nbytes);
++				walk.dst.virt.addr += (walk.nbytes - nbytes);
++				memcpy(walk.iv, walk.dst.virt.addr - bsize ,bsize);
++			}
++			//printk("%s %d (walk.nbytes - nbytes)=%d \n", __FUNCTION__, __LINE__, (walk.nbytes - nbytes));
++			err = blkcipher_walk_done(desc, &walk, nbytes);
++			continue;
++		}
++#endif
+ 		if (walk.src.virt.addr == walk.dst.virt.addr)
+ 			nbytes = crypto_cbc_encrypt_inplace(desc, &walk, child);
+ 		else
+@@ -180,6 +225,44 @@ static int crypto_cbc_decrypt(struct blk
+ 	err = blkcipher_walk_virt(desc, &walk);
+ 
+ 	while ((nbytes = walk.nbytes)) {
++#ifdef CONFIG_CRYPTO_DEV_REALTEK_DBG
++		printk("%s %d: total=%d, walk=%d, blk=%d, src=%p, dst=%p ctx->rtl_ctx.mode=%d \n", __FUNCTION__,__LINE__,
++			walk.total, walk.nbytes, crypto_cipher_blocksize(child),
++			walk.src.virt.addr, walk.dst.virt.addr, ctx->rtl_ctx.mode
++		);
++#endif
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		if (ctx->rtl_ctx.mode >= 0)
++		{
++			int bsize = crypto_cipher_blocksize(child);
++			int offset = 0;
++			u8 last_iv[bsize];
++			if (walk.src.virt.addr == walk.dst.virt.addr)
++			{
++				
++				offset = (nbytes - (nbytes & (bsize - 1)) - bsize);
++				memcpy(last_iv, walk.src.virt.addr + offset, bsize);
++			}
++			nbytes = rtl_cipher_crypt(child, 0,
++				&ctx->rtl_ctx, walk.src.virt.addr, nbytes,
++				walk.iv, walk.dst.virt.addr);
++			
++			// cbc mode update			
++			if (walk.src.virt.addr == walk.dst.virt.addr)
++			{
++				walk.src.virt.addr -= (walk.nbytes - nbytes);				
++				memcpy(walk.iv, last_iv, bsize);
++			}
++			else
++			{
++				walk.src.virt.addr += (walk.nbytes - nbytes);
++				walk.dst.virt.addr += (walk.nbytes - nbytes);
++				memcpy(walk.iv, walk.src.virt.addr - bsize, bsize);
++			}
++			err = blkcipher_walk_done(desc, &walk, nbytes);
++			continue;
++		}
++#endif
+ 		if (walk.src.virt.addr == walk.dst.virt.addr)
+ 			nbytes = crypto_cbc_decrypt_inplace(desc, &walk, child);
+ 		else
+@@ -202,6 +285,9 @@ static int crypto_cbc_init_tfm(struct cr
+ 		return PTR_ERR(cipher);
+ 
+ 	ctx->child = cipher;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	rtl_cipher_init_ctx(tfm, &ctx->rtl_ctx);
++#endif
+ 	return 0;
+ }
+ 
+Index: linux-3.10.49/crypto/ctr.c
+===================================================================
+--- linux-3.10.49.orig/crypto/ctr.c
++++ linux-3.10.49/crypto/ctr.c
+@@ -21,8 +21,14 @@
+ #include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++#include "../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
+ struct crypto_ctr_ctx {
+ 	struct crypto_cipher *child;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct rtl_cipher_ctx rtl_ctx;
++#endif
+ };
+ 
+ struct crypto_rfc3686_ctx {
+@@ -49,6 +55,10 @@ static int crypto_ctr_setkey(struct cryp
+ 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
+ 			     CRYPTO_TFM_RES_MASK);
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	if (err == 0)
++		err = rtl_cipher_setkey(child, &ctx->rtl_ctx, key, keylen);
++#endif
+ 	return err;
+ }
+ 
+@@ -139,6 +149,91 @@ static int crypto_ctr_crypt(struct blkci
+ 	err = blkcipher_walk_virt_block(desc, &walk, bsize);
+ 
+ 	while (walk.nbytes >= bsize) {
++
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		if (ctx->rtl_ctx.mode >= 0)
++		{
++			int i, over_flag = 0;
++			unsigned int one = 0, len = 0;			
++			u8 over_iv[32] = {0};
++			u8 *src = walk.src.virt.addr;
++			u8 *dst = walk.dst.virt.addr;
++			/* hw CTRBLK overflow handle different with linux kernel
++			 *  hw engine: CTRBLK := NONCE || IV || ONE,  NONCE 4 bytes, IV 8bytes, ONE 4bytes 
++			 *  hw engine only the ONE(4bytes) is treated as counter bytes
++			 *  linux kernel uses the second method, which means the entire byte block is treated as counter bytes
++			 */
++			over_flag = 0;
++			one = *((unsigned int *)(walk.iv + bsize - 4));
++			for (i = 0; i < (walk.nbytes / bsize); i++)
++			{					
++				if (one == 0xffffffff)
++				{
++					//printk("%s %d i=%d one=%u\n", __FUNCTION__, __LINE__, i, one);
++					over_flag = 1;
++					break;
++				}
++				one++;
++			}
++			if (over_flag)
++			{
++				//before ONE overflow 
++				len = bsize*(i+1);
++				nbytes = rtl_cipher_crypt(child, 1,
++				&ctx->rtl_ctx, walk.src.virt.addr, len,
++				walk.iv, walk.dst.virt.addr);
++				//printk("%s %d len=%u nbytes=%u \n", __FUNCTION__, __LINE__, len, nbytes);
++				src += (len - nbytes);
++				dst += (len - nbytes);
++								
++				//after ONE overflow,update IV
++				memcpy(over_iv, walk.iv, bsize - 4);
++				crypto_inc(over_iv, bsize-4);
++				memcpy(walk.iv, over_iv, bsize);
++				
++				nbytes = rtl_cipher_crypt(child, 1,
++				&ctx->rtl_ctx, src, walk.nbytes -len,
++				walk.iv, dst);
++				
++				/* increment counter in counterblock */
++				for (i = 0; i < ((walk.nbytes -len) / bsize); i++)
++					crypto_inc(walk.iv, bsize);
++				
++				if (walk.src.virt.addr == walk.dst.virt.addr)
++				{
++					src += ((walk.nbytes -len) - nbytes);
++				}
++				else
++				{
++					src += ((walk.nbytes -len) - nbytes);
++					dst += ((walk.nbytes -len) - nbytes);
++				}
++				
++			}
++			else
++			{
++				nbytes = rtl_cipher_crypt(child, 1,
++					&ctx->rtl_ctx, walk.src.virt.addr, walk.nbytes,
++					walk.iv, walk.dst.virt.addr);		
++				if (walk.src.virt.addr == walk.dst.virt.addr)
++				{
++					walk.src.virt.addr += (walk.nbytes - nbytes);
++				}
++				else
++				{
++					walk.dst.virt.addr += (walk.nbytes - nbytes);
++					walk.dst.virt.addr += (walk.nbytes - nbytes);
++				}
++				/* increment counter in counterblock */
++				for (i = 0; i < (walk.nbytes / bsize); i++)
++					crypto_inc(walk.iv, bsize);
++			}
++
++			err = blkcipher_walk_done(desc, &walk, nbytes);
++			continue;
++		}
++#endif
++
+ 		if (walk.src.virt.addr == walk.dst.virt.addr)
+ 			nbytes = crypto_ctr_crypt_inplace(&walk, child);
+ 		else
+@@ -168,6 +263,9 @@ static int crypto_ctr_init_tfm(struct cr
+ 
+ 	ctx->child = cipher;
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	rtl_cipher_init_ctx(tfm, &ctx->rtl_ctx);
++#endif
+ 	return 0;
+ }
+ 
+Index: linux-3.10.49/crypto/ecb.c
+===================================================================
+--- linux-3.10.49.orig/crypto/ecb.c
++++ linux-3.10.49/crypto/ecb.c
+@@ -18,8 +18,15 @@
+ #include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++#include "../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
++
+ struct crypto_ecb_ctx {
+ 	struct crypto_cipher *child;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct rtl_cipher_ctx rtl_ctx;
++#endif
+ };
+ 
+ static int crypto_ecb_setkey(struct crypto_tfm *parent, const u8 *key,
+@@ -35,6 +42,10 @@ static int crypto_ecb_setkey(struct cryp
+ 	err = crypto_cipher_setkey(child, key, keylen);
+ 	crypto_tfm_set_flags(parent, crypto_cipher_get_flags(child) &
+ 				     CRYPTO_TFM_RES_MASK);
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	if (err == 0)
++		err = rtl_cipher_setkey(child, &ctx->rtl_ctx, key, keylen);
++#endif
+ 	return err;
+ }
+ 
+@@ -46,6 +57,9 @@ static int crypto_ecb_crypt(struct blkci
+ 	int bsize = crypto_cipher_blocksize(tfm);
+ 	unsigned int nbytes;
+ 	int err;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct crypto_ecb_ctx *ctx = crypto_blkcipher_ctx(desc->tfm);
++#endif
+ 
+ 	err = blkcipher_walk_virt(desc, walk);
+ 
+@@ -53,6 +67,20 @@ static int crypto_ecb_crypt(struct blkci
+ 		u8 *wsrc = walk->src.virt.addr;
+ 		u8 *wdst = walk->dst.virt.addr;
+ 
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		if (ctx->rtl_ctx.mode >= 0)
++		{
++			nbytes = rtl_cipher_crypt(tfm,
++				fn == crypto_cipher_alg(tfm)->cia_encrypt,
++				&ctx->rtl_ctx, wsrc, nbytes,
++				walk->iv, wdst);
++			wsrc += (walk->nbytes - nbytes);
++			wdst += (walk->nbytes - nbytes);
++			err = blkcipher_walk_done(desc, walk, nbytes);
++			continue;
++		}
++#endif
++
+ 		do {
+ 			fn(crypto_cipher_tfm(tfm), wdst, wsrc);
+ 
+@@ -106,6 +134,9 @@ static int crypto_ecb_init_tfm(struct cr
+ 		return PTR_ERR(cipher);
+ 
+ 	ctx->child = cipher;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	rtl_cipher_init_ctx(tfm, &ctx->rtl_ctx);
++#endif
+ 	return 0;
+ }
+ 
+Index: linux-3.10.49/crypto/md5.c
+===================================================================
+--- linux-3.10.49.orig/crypto/md5.c
++++ linux-3.10.49/crypto/md5.c
+@@ -49,6 +49,13 @@ static inline void md5_transform_helper(
+ 
+ static int md5_init(struct shash_desc *desc)
+ {
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct md5_state *mctx = shash_desc_ctx(desc);
++	rtl_hash_init_ctx(crypto_shash_tfm(desc->tfm), &mctx->rtl_ctx);
++	mctx->byte_count = 0;
++	return 0;
++#else
++
+ 	struct md5_state *mctx = shash_desc_ctx(desc);
+ 
+ 	mctx->hash[0] = 0x67452301;
+@@ -58,6 +65,7 @@ static int md5_init(struct shash_desc *d
+ 	mctx->byte_count = 0;
+ 
+ 	return 0;
++#endif
+ }
+ 
+ static int md5_update(struct shash_desc *desc, const u8 *data, unsigned int len)
+@@ -70,12 +78,18 @@ static int md5_update(struct shash_desc 
+ 	if (avail > len) {
+ 		memcpy((char *)mctx->block + (sizeof(mctx->block) - avail),
+ 		       data, len);
++		#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		rtl_hash_update(&mctx->rtl_ctx, (u8 *) data, len);
++		#endif		
+ 		return 0;
+ 	}
+ 
+ 	memcpy((char *)mctx->block + (sizeof(mctx->block) - avail),
+ 	       data, avail);
+-
++	#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	rtl_hash_update(&mctx->rtl_ctx, (u8 *) data, len);
++	return 0;
++	#endif
+ 	md5_transform_helper(mctx);
+ 	data += avail;
+ 	len -= avail;
+@@ -92,8 +106,28 @@ static int md5_update(struct shash_desc 
+ 	return 0;
+ }
+ 
++#if 0//def CONFIG_CRYPTO_DEV_REALTEK
++static int md5_digest(struct shash_desc *desc, const u8 *data,
++	unsigned int len, u8 *out)
++{
++	struct md5_state *mctx = shash_desc_ctx(desc);
++	printk("%s %d \n", __FUNCTION__, __LINE__);
++	#if 1
++	mctx->rtl_ctx.mode = 0x00; //md5
++	return rtl_hash_digest(&mctx->rtl_ctx, (u8 *) data, len, out);
++	#else
++	return 0;
++	#endif
++}
++#endif
+ static int md5_final(struct shash_desc *desc, u8 *out)
+ {
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct md5_state *mctx = shash_desc_ctx(desc);
++	 rtl_hash_final(&mctx->rtl_ctx, out);
++	 memset(mctx, 0, sizeof(*mctx));
++	return 0;
++#else
+ 	struct md5_state *mctx = shash_desc_ctx(desc);
+ 	const unsigned int offset = mctx->byte_count & 0x3f;
+ 	char *p = (char *)mctx->block + offset;
+@@ -118,6 +152,7 @@ static int md5_final(struct shash_desc *
+ 	memset(mctx, 0, sizeof(*mctx));
+ 
+ 	return 0;
++#endif
+ }
+ 
+ static int md5_export(struct shash_desc *desc, void *out)
+@@ -133,6 +168,11 @@ static int md5_import(struct shash_desc 
+ 	struct md5_state *ctx = shash_desc_ctx(desc);
+ 
+ 	memcpy(ctx, in, sizeof(*ctx));
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	ctx->rtl_ctx.length = 0;
++	rtl_hash_update(&ctx->rtl_ctx, (u8 *) ctx->block, ctx->byte_count);
++#endif
++
+ 	return 0;
+ }
+ 
+@@ -141,6 +181,9 @@ static struct shash_alg alg = {
+ 	.init		=	md5_init,
+ 	.update		=	md5_update,
+ 	.final		=	md5_final,
++#if 0//def CONFIG_CRYPTO_DEV_REALTEK
++	.digest		=	md5_digest,
++#endif
+ 	.export		=	md5_export,
+ 	.import		=	md5_import,
+ 	.descsize	=	sizeof(struct md5_state),
+Index: linux-3.10.49/crypto/sha1_generic.c
+===================================================================
+--- linux-3.10.49.orig/crypto/sha1_generic.c
++++ linux-3.10.49/crypto/sha1_generic.c
+@@ -33,6 +33,10 @@ static int sha1_init(struct shash_desc *
+ 		.state = { SHA1_H0, SHA1_H1, SHA1_H2, SHA1_H3, SHA1_H4 },
+ 	};
+ 
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	rtl_hash_init_ctx(crypto_shash_tfm(desc->tfm), &sctx->rtl_ctx);
++	#endif
++	
+ 	return 0;
+ }
+ 
+@@ -47,7 +51,16 @@ int crypto_sha1_update(struct shash_desc
+ 	sctx->count += len;
+ 	done = 0;
+ 	src = data;
+-
++	
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	if (len <= SHA1_BLOCK_SIZE)
++	{		
++		memcpy((char *)sctx->buffer, data, len);
++	}
++	rtl_hash_update(&sctx->rtl_ctx, (u8 *) data, len);
++	return 0;
++	#endif
++	
+ 	if ((partial + len) >= SHA1_BLOCK_SIZE) {
+ 		u32 temp[SHA_WORKSPACE_WORDS];
+ 
+@@ -73,10 +86,29 @@ int crypto_sha1_update(struct shash_desc
+ }
+ EXPORT_SYMBOL(crypto_sha1_update);
+ 
++#if 0//def CONFIG_CRYPTO_DEV_REALTEK
++static int sha1_digest(struct shash_desc *desc, const u8 *data,
++	unsigned int len, u8 *out)
++{
++	struct sha1_state *sctx = shash_desc_ctx(desc);
++	printk("%s %d \n", __FUNCTION__, __LINE__);
++	
++#if 1
++	return rtl_hash_digest(&sctx->rtl_ctx, (u8 *) data, len, out);
++#else
++	return 0;
++#endif
++}
++#endif
+ 
+ /* Add padding and return the message digest. */
+ static int sha1_final(struct shash_desc *desc, u8 *out)
+ {
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct sha1_state *sctx = shash_desc_ctx(desc);
++
++	return rtl_hash_final(&sctx->rtl_ctx, out);
++#else
+ 	struct sha1_state *sctx = shash_desc_ctx(desc);
+ 	__be32 *dst = (__be32 *)out;
+ 	u32 i, index, padlen;
+@@ -101,6 +133,7 @@ static int sha1_final(struct shash_desc 
+ 	memset(sctx, 0, sizeof *sctx);
+ 
+ 	return 0;
++#endif
+ }
+ 
+ static int sha1_export(struct shash_desc *desc, void *out)
+@@ -116,6 +149,11 @@ static int sha1_import(struct shash_desc
+ 	struct sha1_state *sctx = shash_desc_ctx(desc);
+ 
+ 	memcpy(sctx, in, sizeof(*sctx));
++		
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++		sctx->rtl_ctx.length = 0;
++		rtl_hash_update(&sctx->rtl_ctx, (u8 *) sctx->buffer, SHA1_BLOCK_SIZE);
++#endif
+ 	return 0;
+ }
+ 
+@@ -124,6 +162,9 @@ static struct shash_alg alg = {
+ 	.init		=	sha1_init,
+ 	.update		=	crypto_sha1_update,
+ 	.final		=	sha1_final,
++#if 0//def CONFIG_CRYPTO_DEV_REALTEK
++	.digest		=	sha1_digest,
++#endif
+ 	.export		=	sha1_export,
+ 	.import		=	sha1_import,
+ 	.descsize	=	sizeof(struct sha1_state),
+Index: linux-3.10.49/crypto/tcrypt.c
+===================================================================
+--- linux-3.10.49.orig/crypto/tcrypt.c
++++ linux-3.10.49/crypto/tcrypt.c
+@@ -948,8 +948,11 @@ static inline int tcrypt_test(const char
+ 		ret = 0;
+ 	return ret;
+ }
+-
++#if defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
++int do_test(int m)
++#else	
+ static int do_test(int m)
++#endif
+ {
+ 	int i;
+ 	int ret = 0;
+@@ -970,14 +973,18 @@ static int do_test(int m)
+ 
+ 	case 3:
+ 		ret += tcrypt_test("ecb(des)");
+-		ret += tcrypt_test("cbc(des)");
++		ret += tcrypt_test("cbc(des)");		
++		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
+ 		ret += tcrypt_test("ctr(des)");
++		#endif
+ 		break;
+ 
+ 	case 4:
+ 		ret += tcrypt_test("ecb(des3_ede)");
+ 		ret += tcrypt_test("cbc(des3_ede)");
++		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
+ 		ret += tcrypt_test("ctr(des3_ede)");
++		#endif
+ 		break;
+ 
+ 	case 5:
+@@ -1012,9 +1019,11 @@ static int do_test(int m)
+ 
+ 	case 10:
+ 		ret += tcrypt_test("ecb(aes)");
+-		ret += tcrypt_test("cbc(aes)");
++		ret += tcrypt_test("cbc(aes)");		
++		#if !defined(CONFIG_CRYPTO_DEV_REALTEK_LINUX_SELFTEST)
+ 		ret += tcrypt_test("lrw(aes)");
+ 		ret += tcrypt_test("xts(aes)");
++		#endif
+ 		ret += tcrypt_test("ctr(aes)");
+ 		ret += tcrypt_test("rfc3686(ctr(aes))");
+ 		break;
+Index: linux-3.10.49/crypto/testmgr.c
+===================================================================
+--- linux-3.10.49.orig/crypto/testmgr.c
++++ linux-3.10.49/crypto/testmgr.c
+@@ -29,6 +29,12 @@
+ #include <crypto/rng.h>
+ 
+ #include "internal.h"
++#ifdef CONFIG_CRYPTO_DEV_REALTEK_TEST
++#include <net/rtl/rtl_types.h>
++#include <net/rtl/rtl_glue.h>
++
++#include "../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
+ 
+ #ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
+ 
+@@ -1467,9 +1473,10 @@ static int alg_test_skcipher(const struc
+ {
+ 	struct crypto_ablkcipher *tfm;
+ 	int err = 0;
+-
++	SMP_LOCK_IPSEC;
+ 	tfm = crypto_alloc_ablkcipher(driver, type, mask);
+ 	if (IS_ERR(tfm)) {
++		SMP_UNLOCK_IPSEC;
+ 		printk(KERN_ERR "alg: skcipher: Failed to load transform for "
+ 		       "%s: %ld\n", driver, PTR_ERR(tfm));
+ 		return PTR_ERR(tfm);
+@@ -1488,6 +1495,7 @@ static int alg_test_skcipher(const struc
+ 
+ out:
+ 	crypto_free_ablkcipher(tfm);
++	SMP_UNLOCK_IPSEC;
+ 	return err;
+ }
+ 
+@@ -1540,9 +1548,10 @@ static int alg_test_hash(const struct al
+ {
+ 	struct crypto_ahash *tfm;
+ 	int err;
+-
++	SMP_LOCK_IPSEC;
+ 	tfm = crypto_alloc_ahash(driver, type, mask);
+ 	if (IS_ERR(tfm)) {
++		SMP_UNLOCK_IPSEC;	
+ 		printk(KERN_ERR "alg: hash: Failed to load transform for %s: "
+ 		       "%ld\n", driver, PTR_ERR(tfm));
+ 		return PTR_ERR(tfm);
+@@ -1555,6 +1564,7 @@ static int alg_test_hash(const struct al
+ 				desc->suite.hash.count, false);
+ 
+ 	crypto_free_ahash(tfm);
++	SMP_UNLOCK_IPSEC;	
+ 	return err;
+ }
+ 
+Index: linux-3.10.49/include/crypto/md5.h
+===================================================================
+--- linux-3.10.49.orig/include/crypto/md5.h
++++ linux-3.10.49/include/crypto/md5.h
+@@ -2,6 +2,9 @@
+ #define _CRYPTO_MD5_H
+ 
+ #include <linux/types.h>
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
+ 
+ #define MD5_DIGEST_SIZE		16
+ #define MD5_HMAC_BLOCK_SIZE	64
+@@ -12,6 +15,9 @@ struct md5_state {
+ 	u32 hash[MD5_HASH_WORDS];
+ 	u32 block[MD5_BLOCK_WORDS];
+ 	u64 byte_count;
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct rtl_hash_ctx rtl_ctx;
++#endif
+ };
+ 
+ #endif
+Index: linux-3.10.49/include/crypto/sha.h
+===================================================================
+--- linux-3.10.49.orig/include/crypto/sha.h
++++ linux-3.10.49/include/crypto/sha.h
+@@ -6,6 +6,9 @@
+ #define _CRYPTO_SHA_H
+ 
+ #include <linux/types.h>
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
+ 
+ #define SHA1_DIGEST_SIZE        20
+ #define SHA1_BLOCK_SIZE         64
+@@ -68,6 +71,9 @@ struct sha1_state {
+ 	u64 count;
+ 	u32 state[SHA1_DIGEST_SIZE / 4];
+ 	u8 buffer[SHA1_BLOCK_SIZE];
++#ifdef CONFIG_CRYPTO_DEV_REALTEK
++	struct rtl_hash_ctx rtl_ctx;
++#endif
+ };
+ 
+ struct sha256_state {

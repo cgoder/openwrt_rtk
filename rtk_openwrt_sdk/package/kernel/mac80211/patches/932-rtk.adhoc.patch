@@ -1,0 +1,14 @@
+diff -urN old/net/wireless/chan.c patch/net/wireless/chan.c
+--- old/net/wireless/chan.c	2014-05-24 01:32:18.000000000 +0800
++++ patch/net/wireless/chan.c	2014-11-05 15:50:28.000000000 +0800
+@@ -814,8 +814,10 @@
+ {
+ 	if (!rdev->ops->set_monitor_channel)
+ 		return -EOPNOTSUPP;
++#if 0 //rtk: make iw set freq work (for Ad-Hoc)
+ 	if (!cfg80211_has_monitors_only(rdev))
+ 		return -EBUSY;
++#endif
+ 
+ 	return rdev_set_monitor_channel(rdev, chandef);
+ }

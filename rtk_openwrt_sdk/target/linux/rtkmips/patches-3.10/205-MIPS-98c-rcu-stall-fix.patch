@@ -1,0 +1,177 @@
+diff -urN a/kernel/rcutree.c b/kernel/rcutree.c
+--- a/kernel/rcutree.c	2014-11-13 12:18:34.686446237 +0800
++++ b/kernel/rcutree.c	2014-11-13 13:22:47.671991657 +0800
+@@ -753,6 +753,13 @@
+ }
+ 
+ /*
+++ * This function really isn't for public consumption, but RCU is special in
+++ * that context switches can allow the state machine to make progress.
+++ */
++#if defined(CONFIG_RTL_8198C)
++extern void resched_cpu(int cpu);
++#endif
++/*
+  * Return true if the specified CPU has passed through a quiescent
+  * state by virtue of being in or having passed through an dynticks
+  * idle state since the last call to dyntick_save_progress_counter()
+@@ -809,13 +816,42 @@
+ 	 */
+ 	rcu_kick_nohz_cpu(rdp->cpu);
+ 
++#ifdef CONFIG_RTL_8198C
++		/*
++	 * Alternatively, the CPU might be running in the kernel
++	 * for an extended period of time without a quiescent state.
++	 * Attempt to force the CPU through the scheduler to gain the
++	 * needed quiescent state, but only if the grace period has gone
++	 * on for an uncommonly long time.  If there are many stuck CPUs,
++	 * we will beat on the first one until it gets unstuck, then move
++	 * to the next.  Only do this for the primary flavor of RCU.
++	 */
++	if (rdp->rsp == rcu_state &&
++	    ULONG_CMP_GE(ACCESS_ONCE(jiffies), rdp->rsp->jiffies_resched)) {
++		rdp->rsp->jiffies_resched += 5;
++		resched_cpu(rdp->cpu);
++	}
++
++#endif
+ 	return 0;
+ }
+ 
+ static void record_gp_stall_check_time(struct rcu_state *rsp)
+ {
++#if !defined(CONFIG_RTL_8198C)
+ 	rsp->gp_start = jiffies;
+ 	rsp->jiffies_stall = jiffies + rcu_jiffies_till_stall_check();
++#else
++	unsigned long j = ACCESS_ONCE(jiffies);
++	unsigned long j1;
++
++	rsp->gp_start = j;
++	smp_wmb(); /* Record start time before stall time. */
++//	rsp->jiffies_stall = j + rcu_jiffies_till_stall_check();
++	j1 = rcu_jiffies_till_stall_check();
++	rsp->jiffies_stall = j + j1;
++	rsp->jiffies_resched = j + j1 / 2;
++#endif
+ }
+ 
+ /*
+@@ -941,7 +977,7 @@
+ 
+ 	set_need_resched();  /* kick ourselves to get things going. */
+ }
+-
++#if !defined(CONFIG_RTL_8198C)
+ static void check_cpu_stall(struct rcu_state *rsp, struct rcu_data *rdp)
+ {
+ 	unsigned long j;
+@@ -955,7 +991,69 @@
+ 	rnp = rdp->mynode;
+ 	if (rcu_gp_in_progress(rsp) &&
+ 	    (ACCESS_ONCE(rnp->qsmask) & rdp->grpmask) && ULONG_CMP_GE(j, js)) {
++		/* We haven't checked in, so go dump stack. */
++		print_cpu_stall(rsp);
++
++	} else if (rcu_gp_in_progress(rsp) &&
++		   ULONG_CMP_GE(j, js + RCU_STALL_RAT_DELAY)) {
++		/* They had a few time units to dump stack, so complain. */
++		print_other_cpu_stall(rsp);
++	}
++}
++#else
++static void check_cpu_stall(struct rcu_state *rsp, struct rcu_data *rdp)
++{
++	unsigned long completed;
++	unsigned long gpnum;
++	unsigned long gps;
+ 
++
++	unsigned long j;
++	unsigned long js;
++	struct rcu_node *rnp;
++
++//	if (rcu_cpu_stall_suppress)
++	if (rcu_cpu_stall_suppress || !rcu_gp_in_progress(rsp))
++		return;
++	j = ACCESS_ONCE(jiffies);
++
++	/*
+++	 * Lots of memory barriers to reject false positives.
+++	 *
+++	 * The idea is to pick up rsp->gpnum, then rsp->jiffies_stall,
+++	 * then rsp->gp_start, and finally rsp->completed.  These values
+++	 * are updated in the opposite order with memory barriers (or
+++	 * equivalent) during grace-period initialization and cleanup.
+++	 * Now, a false positive can occur if we get an new value of
+++	 * rsp->gp_start and a old value of rsp->jiffies_stall.  But given
+++	 * the memory barriers, the only way that this can happen is if one
+++	 * grace period ends and another starts between these two fetches.
+++	 * Detect this by comparing rsp->completed with the previous fetch
+++	 * from rsp->gpnum.
+++	 *
+++	 * Given this check, comparisons of jiffies, rsp->jiffies_stall,
+++	 * and rsp->gp_start suffice to forestall false positives.
+++	 */
++	gpnum = ACCESS_ONCE(rsp->gpnum);
++	smp_rmb(); /* Pick up ->gpnum first... */
++
++
++	js = ACCESS_ONCE(rsp->jiffies_stall);
++
++	smp_rmb(); /* ...then ->jiffies_stall before the rest... */
++	gps = ACCESS_ONCE(rsp->gp_start);
++	smp_rmb(); /* ...and finally ->gp_start before ->completed. */
++	completed = ACCESS_ONCE(rsp->completed);
++	if (ULONG_CMP_GE(completed, gpnum) ||
++	    ULONG_CMP_LT(j, js) ||
++	    ULONG_CMP_GE(gps, js))
++		return; /* No stall or GP completed since entering function. */
++
++
++	rnp = rdp->mynode;
++	if (rcu_gp_in_progress(rsp) &&
++//	    (ACCESS_ONCE(rnp->qsmask) & rdp->grpmask) && ULONG_CMP_GE(j, js)) {
++	(ACCESS_ONCE(rnp->qsmask) & rdp->grpmask)) {
+ 		/* We haven't checked in, so go dump stack. */
+ 		print_cpu_stall(rsp);
+ 
+@@ -966,7 +1064,7 @@
+ 		print_other_cpu_stall(rsp);
+ 	}
+ }
+-
++#endif
+ /**
+  * rcu_cpu_stall_reset - prevent further stall warnings in current grace period
+  *
+@@ -1414,9 +1512,15 @@
+ 	}
+ 
+ 	/* Advance to a new grace period and initialize state. */
++#if defined(CONFIG_RTL_8198C)
++	record_gp_stall_check_time(rsp);
++	smp_wmb(); /* Record GP times before starting GP. */
++#endif
+ 	rsp->gpnum++;
+ 	trace_rcu_grace_period(rsp->name, rsp->gpnum, "start");
++#if !defined(CONFIG_RTL_8198C)
+ 	record_gp_stall_check_time(rsp);
++#endif
+ 	raw_spin_unlock_irq(&rnp->lock);
+ 
+ 	/* Exclude any concurrent CPU-hotplug operations. */
+diff -urN a/kernel/rcutree.h b/kernel/rcutree.h
+--- a/kernel/rcutree.h	2014-11-13 13:21:09.090298340 +0800
++++ b/kernel/rcutree.h	2014-11-13 13:23:42.365811095 +0800
+@@ -438,6 +438,9 @@
+ 						/*  but in jiffies. */
+ 	unsigned long jiffies_stall;		/* Time at which to check */
+ 						/*  for CPU stalls. */
++#if defined(CONFIG_RTL_8198C)
++	unsigned long jiffies_resched;		/* Time at which to resched */
++#endif
+ 	unsigned long gp_max;			/* Maximum GP duration in */
+ 						/*  jiffies. */
+ 	char *name;				/* Name of structure. */

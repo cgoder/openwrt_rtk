@@ -1,0 +1,4 @@
+config system
+	option hostname rtl819xd
+	option timezone UTC
+

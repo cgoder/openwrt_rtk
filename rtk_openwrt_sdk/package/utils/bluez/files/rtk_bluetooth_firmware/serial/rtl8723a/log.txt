@@ -1,0 +1,1 @@
+rlt8723a_chip_b_cut_bt40_fw_asic_rom_patch-svn10889-0x002F3213-BTCOEX20130528-3333-20131004-LINUX_UART.bin

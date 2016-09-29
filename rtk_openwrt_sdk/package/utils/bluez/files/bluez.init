@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2007-2011 OpenWrt.org
+
+START=61
+
+SERVICE_PID_FILE=/var/run/bluetoothd.pid
+
+start() {
+	mkdir -m 0755 -p /var/run/bluetoothd/
+    #hciattach -n -s 115200 /dev/ttyS1 rtk_h5 115200 &
+    #sleep 5
+    #hciconfig hci0 up
+    #hciconfig hci0 reset
+    #sleep 1
+	/usr/lib/bluetooth/bluetoothd &
+}

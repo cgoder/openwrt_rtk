@@ -1,0 +1,186 @@
+diff -ruN before/include/fs.h after/include/fs.h
+--- before/include/fs.h	2015-07-20 16:34:31.264407800 +0800
++++ after/include/fs.h	2015-07-20 15:27:40.319967800 +0800
+@@ -8,5 +8,6 @@
+ #define NTFS		8
+ #define EXTENDED	9
+ #define EXT4		10
++#define EXFAT		11
+ 
+ int detect_fs(char *device);
+diff -ruN before/lib/fs.c after/lib/fs.c
+--- before/lib/fs.c	2015-07-20 16:34:31.268407800 +0800
++++ after/lib/fs.c	2015-07-20 17:30:45.358632882 +0800
+@@ -116,7 +116,8 @@
+ 
+ 	if (((((buffer[0] & 0xff) == 0xEB) && ((buffer[2] & 0xff) == 0x90)) || ((buffer[0] & 0xff) == 0xE9))
+ 		&& ((buffer[510] & 0xff) == 0x55) /*&& ((buffer[511] & 0xff == 0xAA))*/
+-		&& (memcmp(buffer + 3, "NTFS    ", 8)))
++		&& (memcmp(buffer + 3, "NTFS    ", 8))
++		&& (memcmp(buffer + 3, "EXFAT   ", 8)))
+ 		ret = FAT;
+ out:
+ 	free(buffer);
+@@ -177,10 +178,28 @@
+ 	return ret;
+ }
+ 
++#define EXFAT_BUF_SIZE	512
++int detect_exfat(int fd)
++{
++	int ret = NONE;
++	unsigned char *buffer = (unsigned char*)malloc(EXFAT_BUF_SIZE);
++	if(get_buffer(fd, buffer, 0, EXFAT_BUF_SIZE) != 0)
++		goto out;
++
++	if (((buffer[0] & 0xff) == 0xEB) && ((buffer[2] & 0xff) == 0x90)
++		&& ((buffer[510] & 0xff) == 0x55) && ((buffer[511] & 0xff) == 0xAA)
++		&& (!memcmp(buffer + 3, "EXFAT   ", 8)))
++		ret = EXFAT;
++out:
++	free(buffer);
++	return ret;
++}
++
+ dfunc funcs[] = {
+ 	detect_ext23,
+ 	detect_fat,
+ 	detect_ntfs,
++	detect_exfat,
+ 	detect_hfsplus,
+ 	detect_extended,
+ 	detect_efi,
+@@ -197,7 +216,7 @@
+ 	if(!fd)
+ 		return NONE;
+ 
+-	while((i < 6) && (ret == NONE))
++	while((i < 7) && (ret == NONE))
+ 		ret = funcs[i++](fd);
+ 
+ 	close(fd);
+diff -ruN before/lib/mount.c after/lib/mount.c
+--- before/lib/mount.c	2015-07-20 16:44:21.204596998 +0800
++++ after/lib/mount.c	2015-07-27 16:27:42.529196725 +0800
+@@ -56,7 +56,8 @@
+ 	"",
+ 	"NTFS",
+ 	"",
+-	"EXT4"
++	"EXT4",
++	"EXFAT"
+ };
+ 
+ #define MAX_MOUNTED		32
+@@ -134,7 +135,7 @@
+ {
+ 	struct mount *mount;
+ 	char tmp[64], tmp2[64];
+-	if(fs <= MBR || fs > EXT4)
++	if(fs <= MBR || fs > EXFAT)
+ 		return;
+ 	mount  = malloc(sizeof(struct mount));
+ 	INIT_LIST_HEAD(&mount->list);
+@@ -150,7 +151,7 @@
+ 	mount->mounted = 0;
+ 	mount->fs = fs;
+ 	list_add(&mount->list, &mounts);
+-	if((!mount->ignore) && (mount->fs > MBR) && (mount->fs <= EXT4))
++	if((!mount->ignore) && (mount->fs > MBR) && (mount->fs <= EXFAT))
+ 	{
+ 		log_printf("new mount : %s -> %s (%s)\n", name, dev, fs_names[mount->fs]);
+ 		snprintf(tmp, 64, "%s%s", uci_path, name);
+@@ -215,9 +216,9 @@
+ 	fp = popen("lsmod | grep ufsd 2>&1", "r");
+ 	if(fp)
+ 	{
+-		while (fgets(tmp, sizeof(tmp)-1, fp) != NULL) {
++		while (fgets(tmp, sizeof(tmp)-1, fp) != NULL)
+ 			++nb_of_modules;
+-		}
++		pclose(fp);
+ 	}
+ 	
+ 	mount = mount_find(0, dev);
+@@ -244,21 +245,49 @@
+ 		{
+ 			log_printf("mount -t ext4 -o rw,defaults /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ext4 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			
++			if (WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ext4 mount failed, try to fix mount volume...\n");
++				system_printf("e2fsck -a /dev/%s", mount->dev);
++				log_printf("mount -t ext4 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ext4 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			}
+ 		}
+ 		if(mount->fs == EXT3)
+ 		{
+ 			log_printf("mount -t ext3 -o rw,defaults /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ext3 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			
++			if(WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ext3 mount failed, try to fix mount volume...\n");
++				system_printf("e2fsck -a /dev/%s", mount->dev);
++				log_printf("mount -t ext3 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ext3 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			}
+ 		}
+ 		if(mount->fs == EXT2)
+ 		{
+ 			log_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			
++			if(WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ext2 mount failed, try to fix mount volume...\n");
++				system_printf("e2fsck -a /dev/%s", mount->dev);
++				log_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
++			}
+ 		}
+ 		if(mount->fs == HFSPLUS && nb_of_modules > 0)
+ 		{
+ 			log_printf("ufsd-hfsplus /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++			
++			if(WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ufsd mount failed, try to fix mount volume...\n");
++				system_printf("chkhfs -a -f /dev/%s", mount->dev);
++				log_printf("ufsd-hfs /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++			}
+ 		}
+ 		else if(mount->fs == HFSPLUS)
+ 		{
+@@ -269,12 +298,31 @@
+ 		{
+ 			log_printf("ufsd-ntfs /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++											
++			if(WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ufsd mount failed, try to fix mount volume...\n");
++				system_printf("chkntfs -a -f /dev/%s", mount->dev);
++				log_printf("ufsd-ntfs /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++			}
+ 		}
+ 		else if(mount->fs == NTFS)
+ 		{
+ 			log_printf("ntfs-3g /dev/%s %s -o force", mount->dev, tmp);
+ 			ret = system_printf("ntfs-3g /dev/%s %s -o force", mount->dev, tmp);
+ 		}
++		if(mount->fs == EXFAT && nb_of_modules > 0)
++		{
++			log_printf("ufsd-exfat /dev/%s %s", mount->dev, tmp);
++			ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++			
++			if(WEXITSTATUS(ret) == 0xff) {
++				log_printf("----------> ufsd mount failed, try to fix mount volume...\n");
++				system_printf("chkexfat -a -f /dev/%s", mount->dev);
++				log_printf("ufsd-exfat /dev/%s %s", mount->dev, tmp);
++				ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++			}
++		}
+ 		exit(WEXITSTATUS(ret));
+ 	}
+ 	pid = waitpid(pid, &ret, 0);

@@ -1,0 +1,5 @@
+# 
+# rtl8196e
+#
+cflags-$(CONFIG_SOC_RTL8196E)	+=
+load-$(CONFIG_SOC_RTL8196E)		= 0x80000000

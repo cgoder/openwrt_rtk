@@ -1,0 +1,72 @@
+#
+# Copyright (C) 2012 OpenWrt.org
+#
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+
+include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
+
+PKG_NAME:=rtl_dev_stats
+PKG_VERSION:=0.1
+PKG_RELEASE:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+include $(TOPDIR)/.config
+
+ifdef CONFIG_TARGET_realtek_rtl8196e
+TARGET_DIR:=4181
+endif
+
+ifdef CONFIG_TARGET_realtek_rtl8881a
+TARGET_DIR:=5281
+endif
+
+ifdef CONFIG_TARGET_realtek_rtl819xd
+TARGET_DIR:=5281
+endif
+
+ifdef CONFIG_TARGET_rtkmips_rtl8198c
+TARGET_DIR:=msdk
+endif
+
+ifdef CONFIG_TARGET_rtkmips_rtl8954e
+TARGET_DIR:=msdk
+endif
+
+define KernelPackage/rtl_dev_stats
+  SUBMENU:=Network Support
+  TITLE:=rtl dev stats driver
+  FILES:=$(PKG_BUILD_DIR)/rtl_dev_stats.ko
+  DEPENDS:=+kmod-ipt-core +kmod-ipt-conntrack +kmod-ipt-nat +kmod-ppp +kmod-fastpath
+  DEFAULT:=n
+  KCONFIG:= \
+	CONFIG_RTL_819X=y \
+	CONFIG_RTL_SPEED_MONITOR=y 
+  AUTOLOAD:=$(call AutoLoad,21,rtl_dev_stats)
+endef
+
+define KernelPackage/rtl_dev_stats/description
+ Kernel modules for rtl dev stats support
+endef
+
+include $(INCLUDE_DIR)/kernel-defaults.mk
+
+define Build/Prepare
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)/release
+	$(INSTALL_BIN) release/rtl_dev_stats-$(TARGET_DIR).ko $(PKG_BUILD_DIR)/release/rtl_dev_stats.ko
+endef
+
+define Build/Compile
+
+endef
+
+define KernelPackage/rtl_dev_stats/install
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/release/rtl_dev_stats.ko $(1)/lib/modules/3.10.49
+endef
+
+$(eval $(call KernelPackage,rtl_dev_stats))
+

@@ -1,0 +1,46 @@
+diff -ruN mountd-0.1.orig/lib/mount.c mountd-0.1/lib/mount.c
+--- mountd-0.1.orig/lib/mount.c	2014-11-12 15:15:02.000000000 +0800
++++ mountd-0.1/lib/mount.c	2014-11-19 15:33:18.000000000 +0800
+@@ -209,6 +209,17 @@
+ 	char tmp[256];
+ 	int ret = 1;
+ 	pid_t pid;
++	
++	int nb_of_modules = 0;
++	FILE *fp;
++	fp = popen("lsmod | grep ufsd 2>&1", "r");
++	if(fp)
++	{
++		while (fgets(tmp, sizeof(tmp)-1, fp) != NULL) {
++			++nb_of_modules;
++		}
++	}
++	
+ 	mount = mount_find(0, dev);
+ 	if(!mount)
+ 	{
+@@ -244,12 +255,22 @@
+ 			log_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t ext2 -o rw,defaults /dev/%s %s", mount->dev, tmp);
+ 		}
+-		if(mount->fs == HFSPLUS)
++		if(mount->fs == HFSPLUS && nb_of_modules > 0)
++		{
++			log_printf("ufsd-hfsplus /dev/%s %s", mount->dev, tmp);
++			ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++		}
++		else if(mount->fs == HFSPLUS)
+ 		{
+ 			log_printf("mount -t hfsplus -o rw,defaults,uid=1000,gid=1000 /dev/%s %s", mount->dev, tmp);
+ 			ret = system_printf("mount -t hfsplus -o rw,defaults,uid=1000,gid=1000 /dev/%s %s", mount->dev, tmp);
+ 		}
+-		if(mount->fs == NTFS)
++		if(mount->fs == NTFS && nb_of_modules > 0)
++		{
++			log_printf("ufsd-ntfs /dev/%s %s", mount->dev, tmp);
++			ret = system_printf("mount -t ufsd -o nls=utf8 /dev/%s %s", mount->dev, tmp);
++		}
++		else if(mount->fs == NTFS)
+ 		{
+ 			log_printf("ntfs-3g /dev/%s %s -o force", mount->dev, tmp);
+ 			ret = system_printf("ntfs-3g /dev/%s %s -o force", mount->dev, tmp);

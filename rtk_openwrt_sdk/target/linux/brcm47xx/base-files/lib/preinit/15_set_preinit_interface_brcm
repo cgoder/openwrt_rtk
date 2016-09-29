@@ -1,0 +1,34 @@
+#!/bin/sh
+
+preinit_net_echo_send() {
+	preinit_ip
+
+	[ -d /proc/switch/eth0 ] && [ "$pi_ifname" = "eth0" ] && {
+
+		echo 1 > /proc/switch/eth0/reset
+		echo 1 > /proc/switch/eth0/enable
+		echo 1 > /proc/switch/eth0/enable_vlan
+
+		# this would be easier if we blasted the message across all ports
+		# but we don't want packets leaking across interfaces
+		for port in $(seq 0 4); do {
+
+			echo "$port ${cpu_port:-5u*}" > /proc/switch/eth0/vlan/1/ports
+			sleep 1
+
+			netmsg $pi_broadcast "$1"
+		}; done
+
+	} || netmsg $pi_broadcast "$1"
+}
+
+preinit_net_echo() {
+	[ -n "$pi_ifname" ] && grep -q "$pi_ifname" /proc/net/dev && {
+		{ 
+			[ "$pi_preinit_net_messages" = "y" ] || {
+    		     		[ "$pi_failsafe_net_message"  = "true" ] && 
+    		         	    [ "$pi_preinit_no_failsafe_netmsg" != "y" ] 
+    		         }
+		} && preinit_net_echo_send $1
+    	}
+}

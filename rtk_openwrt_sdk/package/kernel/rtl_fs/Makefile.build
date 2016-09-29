@@ -1,0 +1,71 @@
+#
+# Copyright (C) 2012 OpenWrt.org
+#
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+
+include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
+
+PKG_NAME:=rtl_fs
+PKG_VERSION:=0.1
+PKG_RELEASE:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+include $(TOPDIR)/.config
+
+KERNEL_SOURCE_PATH:=$(KERNEL_BUILD_DIR)/linux-3.10.49
+KERNEL_BUILD_PATH:=$(KERNEL_BUILD_DIR)/linux-3.10.49
+EXT_MODULE_FLAGS:=
+
+ifdef CONFIG_TARGET_rtkmips_rtl8198c
+  MODULE_TARGET:=r274734
+  COMPILER_NAME:=mips-openwrt-linux
+  COMPILER_TARGET="mips"
+  CONFIGURE_ARGS=CFLAGS="-I$(KERNEL_BUILD_PATH)/arch/mips/include/asm/mach-realtek -I$(KERNEL_SOURCE_PATH)/arch/mips/include -I$(KERNEL_BUILD_PATH)/arch/mips/include/generated -I$(KERNEL_BUILD_PATH)/include -I$(KERNEL_SOURCE_PATH)/arch/mips/include/uapi -I$(KERNEL_BUILD_PATH)/arch/mips/include/generated/uapi -I$(KERNEL_SOURCE_PATH)/include/uapi -I$(KERNEL_BUILD_PATH)/include/generated/uapi -DVMLINUX_LOAD_ADDRESS=0x80000000 -DDATAOFFSET=0 -fno-strict-aliasing -fno-common -fno-delete-null-pointer-checks -mno-check-zero-division -mabi=32 -G 0 -mno-abicalls -fno-pic -pipe -msoft-float -ffreestanding -EB -UMIPSEB -U_MIPSEB -U__MIPSEB -U__MIPSEB__ -UMIPSEL -U_MIPSEL -U__MIPSEL -U__MIPSEL__ -DMIPSEB -D_MIPSEB -D__MIPSEB -D__MIPSEB__ -U_MIPS_ISA -D_MIPS_ISA=_MIPS_ISA_MIPS32 -I$(KERNEL_BUILD_PATH)/include/asm-mips -I$(KERNEL_BUILD_PATH)/arch/mips/bsp/ -I$(KERNEL_SOURCE_PATH)/arch/mips/include/asm/mach-generic -fno-stack-protector -fomit-frame-pointer -fno-strict-overflow -fconserve-stack -ffunction-sections -fdata-sections -mlong-calls -DUFSD_BIGENDIAN -O1" CC=${COMPILER_NAME}-gcc --target=${COMPILER_TARGET} --host=${COMPILER_NAME} --with-ks-dir=${KERNEL_SOURCE_PATH} --with-kb-dir=${KERNEL_BUILD_PATH}
+  TARGET_CFLAGS:=PACKAGE_TAG="UFSD_HEAD_r274734_b4561" ARCH="${COMPILER_TARGET}" CROSS_COMPILE=${COMPILER_NAME}- CROSSCOMPILE=${COMPILER_NAME}- TARGET="${COMPILER_TARGET}" CFLAGS="-I$(KERNEL_SOURCE_PATH)/arch/mips/include\ -I$(KERNEL_BUILD_PATH)/arch/mips/include/generated\ -I$(KERNEL_BUILD_PATH)/include\ -I$(KERNEL_SOURCE_PATH)/arch/mips/include/uapi\ -I$(KERNEL_BUILD_PATH)/arch/mips/include/generated/uapi\ -I$(KERNEL_SOURCE_PATH)/include/uapi\ -I$(KERNEL_BUILD_PATH)/include/generated/uapi\ -DVMLINUX_LOAD_ADDRESS=0x80000000\ -DDATAOFFSET=0\ -fno-strict-aliasing\ -fno-common\ -fno-delete-null-pointer-checks\ -mno-check-zero-division\ -mabi=32\ -G\ 0\ -mno-abicalls\ -fno-pic\ -pipe\ -msoft-float\ -ffreestanding\ -EB\ -UMIPSEB\ -U_MIPSEB\ -U__MIPSEB\ -U__MIPSEB__\ -UMIPSEL\ -U_MIPSEL\ -U__MIPSEL\ -U__MIPSEL__\ -DMIPSEB\ -D_MIPSEB\ -D__MIPSEB\ -D__MIPSEB__\ -U_MIPS_ISA\ -D_MIPS_ISA=_MIPS_ISA_MIPS32\ -I$(KERNEL_BUILD_PATH)/include/asm-mips\ -I$(KERNEL_BUILD_PATH)/arch/mips/bsp/\ -I$(KERNEL_SOURCE_PATH)/arch/mips/include/asm/mach-generic\ -fno-stack-protector\ -fomit-frame-pointer\ -fno-strict-overflow\ -fconserve-stack\ -ffunction-sections\ -fdata-sections\ -mlong-calls\ -DUFSD_BIGENDIAN" EXT_MODULE_FLAGS="-DUFSD_DISABLE_UGM,-DUFSD_CHECK_BDI,-DUFSD_TRACE"
+endif
+
+define KernelPackage/rtl_fs
+  SUBMENU:=Filesystems
+  TITLE:=Realtek High Performance NTFS/exFAT/HFS+ filesystem
+  FILES:=$(PKG_BUILD_DIR)/$(MODULE_TARGET)/jnl.ko
+  FILES+=$(PKG_BUILD_DIR)/$(MODULE_TARGET)/ufsd.ko
+  AUTOLOAD:=$(call AutoLoad,,ufsd)
+endef
+
+define KernelPackage/rtl_fs/description
+  Realtek kernel module for supporting NTFS/exFAT/HFS+ filesystem formats with high performance.
+endef
+
+CONFIGURE_PATH=$(MODULE_TARGET)
+MAKE_FLAGS:=$(PKG_BUILD_DIR)/$(MODULE_TARGET) $(TARGET_CFLAGS)
+
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)/$(MODULE_TARGET)
+	mkdir -p ./release/$(MODULE_TARGET)
+	$(CP) ./src/$(MODULE_TARGET)/* $(PKG_BUILD_DIR)/$(MODULE_TARGET)/
+endef
+
+define Build/Configure
+	$(call Build/Configure/Default,$(CONFIGURE_ARGS))
+endef
+
+define Build/Compile
+	$(MAKE) -C $(MAKE_FLAGS) driver
+endef
+
+define KernelPackage/rtl_fs/install
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/*.ko $(1)/lib/modules/3.10.49
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/*.ko ./release/$(MODULE_TARGET)/
+	$(INSTALL_DIR) $(1)/usr/sbin
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/mk* $(1)/usr/sbin/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/chk* $(1)/usr/sbin/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/mk* ./release/$(MODULE_TARGET)/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/chk* ./release/$(MODULE_TARGET)/
+#	$(INSTALL_BIN) $(PKG_BUILD_DIR)/$(MODULE_TARGET)/sysdump_home_nas $(1)/usr/sbin/
+endef
+
+$(eval $(call KernelPackage,rtl_fs))

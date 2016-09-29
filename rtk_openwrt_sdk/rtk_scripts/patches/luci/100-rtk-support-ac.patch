@@ -1,0 +1,43 @@
+diff -urN luci_orig/modules/admin-full/luasrc/model/cbi/admin_network/wifi.lua luci_patch/modules/admin-full/luasrc/model/cbi/admin_network/wifi.lua
+--- luci_orig/modules/admin-full/luasrc/model/cbi/admin_network/wifi.lua	2014-11-07 15:07:45.000000000 +0800
++++ luci_patch/modules/admin-full/luasrc/model/cbi/admin_network/wifi.lua	2014-11-07 15:59:35.000000000 +0800
+@@ -192,7 +192,16 @@
+ 
+ 	mode = s:taboption("advanced", ListValue, "hwmode", translate("Band"))
+ 
+-	if hw_modes.n then
++	if hw_modes.ac then 
++		if hw_modes.ac then mode:value("11a", "5GHz (802.11n+ac)") end 
++
++		htmode = s:taboption("advanced", ListValue, "htmode", translate("VHT mode (802.11ac)")) 
++		htmode:value("", translate("disabled")) 
++		htmode:value("VHT20", "20MHz") 
++		htmode:value("VHT40", "40MHz") 
++		htmode:value("VHT80", "80MHz") 
++
++	elseif hw_modes.n then
+ 		if hw_modes.g then mode:value("11g", "2.4GHz (802.11g+n)") end
+ 		if hw_modes.a then mode:value("11a", "5GHz (802.11a+n)") end
+ 
+diff -urN luci_orig/modules/admin-full/luasrc/view/admin_network/wifi_overview.htm luci_patch/modules/admin-full/luasrc/view/admin_network/wifi_overview.htm
+--- luci_orig/modules/admin-full/luasrc/view/admin_network/wifi_overview.htm	2014-11-07 15:56:44.000000000 +0800
++++ luci_patch/modules/admin-full/luasrc/view/admin_network/wifi_overview.htm	2014-11-07 15:57:15.000000000 +0800
+@@ -36,6 +36,7 @@
+ 				if bl.b then bands = bands .. "b" end
+ 				if bl.g then bands = bands .. "g" end
+ 				if bl.n then bands = bands .. "n" end
++				if bl.ac then bands = bands .. "ac" end
+ 			end
+ 
+ 			local hw = dev.iwinfo.hardware_name
+diff -urN luci_orig/modules/base/luasrc/model/network.lua luci_patch/modules/base/luasrc/model/network.lua
+--- luci_orig/modules/base/luasrc/model/network.lua	2014-11-07 15:55:40.000000000 +0800
++++ luci_patch/modules/base/luasrc/model/network.lua	2014-11-07 15:56:16.000000000 +0800
+@@ -1274,6 +1274,7 @@
+ 	if l.b then m = m .. "b" end
+ 	if l.g then m = m .. "g" end
+ 	if l.n then m = m .. "n" end
++	if l.ac then m = "ac" end
+ 
+ 	return "%s 802.11%s Wireless Controller (%s)" %{ t, m, self:name() }
+ end

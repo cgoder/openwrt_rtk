@@ -1,0 +1,39 @@
+diff -urN old/pcap-linux.c patch/pcap-linux.c
+--- old/pcap-linux.c	2014-11-05 10:54:03.000000000 +0800
++++ patch/pcap-linux.c	2014-11-05 10:59:45.000000000 +0800
+@@ -249,7 +249,7 @@
+ typedef int		socklen_t;
+ #endif
+ 
+-#undef IW_MODE_MONITOR
++//#undef IW_MODE_MONITOR
+ 
+ #ifndef MSG_TRUNC
+ /*
+@@ -965,7 +965,7 @@
+ 	 * (We assume that if we have Wireless Extensions support
+ 	 * we also have PF_PACKET support.)
+ 	 */
+-	sock_fd = socket(PF_PACKET, SOCK_RAW, p->opt.proto);
++	sock_fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+ 	if (sock_fd == -1) {
+ 		(void)snprintf(handle->errbuf, PCAP_ERRBUF_SIZE,
+ 		    "socket: %s", pcap_strerror(errno));
+@@ -4880,7 +4880,7 @@
+ 	ireq.ifr_ifrn.ifrn_name[sizeof ireq.ifr_ifrn.ifrn_name - 1] = 0;
+ 	ireq.u.data.pointer = (void *)args;
+ 	ireq.u.data.length = 0;
+-	ireq.u.data.flags = 0;
++	ireq.u.data.flags = 0;	
+ 	if (ioctl(sock_fd, SIOCGIWPRIV, &ireq) != -1) {
+ 		snprintf(handle->errbuf, PCAP_ERRBUF_SIZE,
+ 		    "%s: SIOCGIWPRIV with a zero-length buffer didn't fail!",
+@@ -4904,6 +4904,8 @@
+ 		/*
+ 		 * OK, try to get the list of private ioctls.
+ 		 */
++		if (ireq.u.data.length == 0)
++			ireq.u.data.length = 44;	//  values depends on privtab[] size
+ 		priv = malloc(ireq.u.data.length * sizeof (struct iw_priv_args));
+ 		if (priv == NULL) {
+ 			snprintf(handle->errbuf, PCAP_ERRBUF_SIZE,

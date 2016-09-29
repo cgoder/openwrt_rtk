@@ -1,0 +1,4 @@
+config system
+	option hostname rtkmips
+	option timezone UTC
+

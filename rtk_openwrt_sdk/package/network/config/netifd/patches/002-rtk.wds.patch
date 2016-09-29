@@ -1,0 +1,15 @@
+diff -urN old/scripts/netifd-wireless.sh patch/scripts/netifd-wireless.sh
+--- old/scripts/netifd-wireless.sh	2014-10-02 15:34:34.000000000 +0800
++++ patch/scripts/netifd-wireless.sh	2014-11-04 11:36:35.000000000 +0800
+@@ -281,6 +281,11 @@
+ 
+ _wdev_common_iface_config() {
+ 	config_add_string mode ssid encryption 'key:wpakey'
++	
++	config_add_string rtk_wds rtk_wds_num rtk_wds_privacy rtk_wds_wepkey rtk_wds_passphrase \
++	rtk_wds_macaddr0 rtk_wds_macaddr1 rtk_wds_macaddr2 rtk_wds_macaddr3 \
++	rtk_wds_macaddr4 rtk_wds_macaddr5 rtk_wds_macaddr6 rtk_wds_macaddr7
++
+ }
+ 
+ init_wireless_driver() {

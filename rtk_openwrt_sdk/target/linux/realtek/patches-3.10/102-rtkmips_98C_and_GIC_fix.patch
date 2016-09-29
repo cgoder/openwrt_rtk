@@ -1,0 +1,107 @@
+diff -urN a/arch/mips/include/asm/gic.h b/arch/mips/include/asm/gic.h
+--- a/arch/mips/include/asm/gic.h	2014-01-29 17:22:07.000000000 +0800
++++ b/arch/mips/include/asm/gic.h	2014-01-29 17:24:08.000000000 +0800
+@@ -19,7 +19,11 @@
+ #define GIC_TRIG_EDGE			1
+ #define GIC_TRIG_LEVEL			0
+ 
++#ifdef CONFIG_RTL_8198C
++#define GIC_NUM_INTRS			(60 + NR_CPUS * 2)
++#else
+ #define GIC_NUM_INTRS			(24 + NR_CPUS * 2)
++#endif
+ 
+ #define MSK(n) ((1 << (n)) - 1)
+ #define REG32(addr)		(*(volatile unsigned int *) (addr))
+diff -urN a/arch/mips/kernel/head.S b/arch/mips/kernel/head.S
+--- a/arch/mips/kernel/head.S	2014-01-29 17:21:24.000000000 +0800
++++ b/arch/mips/kernel/head.S	2014-01-29 17:24:35.000000000 +0800
+@@ -211,6 +211,42 @@
+  * function after setting up the stack and gp registers.
+  */
+ NESTED(smp_bootstrap, 16, sp)
++
++#ifdef CONFIG_RTL_8198C
++/*
++	#define SRAM_BASE (0x80000000+(64<<20))  //32M
++	#define smpboot_pc (SRAM_BASE+0x00)
++	#define	smpboot_gp (SRAM_BASE+0x04)
++	#define	smpboot_sp (SRAM_BASE+0x08)
++	#define	smpboot_a0 (SRAM_BASE+0x0c)
++*/
++   	#define PATT_READY  0x5555
++   	#define PATT_MAGIC  0x7777
++   	#define PATT_GO     0x9999		
++	#define LAUNCH_REG  0xb8000068		
++	#define POLLING_REG 0xb800006c
++		
++	.extern smpboot_gp	
++	la t0,smpboot_gp
++	or t0,0xa0000000
++	lw gp,0(t0)
++	nop
++
++	.extern smpboot_sp
++	la t0,smpboot_sp
++	or t0,0xa0000000	
++	lw sp,0(t0)
++	nop
++
++	li t0,POLLING_REG
++	li t1, 0xfff0
++	sw t1,0(t0)
++	nop
++
++	setup_c0_status_sec
++	smp_slave_setup
++#else
++
+ #ifdef CONFIG_MIPS_MT_SMTC
+ 	/*
+ 	 * Read-modify-writes of Status must be atomic, and this
+@@ -230,6 +266,8 @@
+ 	EMT		# emt
+ 2:
+ #endif /* CONFIG_MIPS_MT_SMTC */
++
++#endif
+ 	j	start_secondary
+ 	END(smp_bootstrap)
+ #endif /* CONFIG_SMP */
+diff -urN a/arch/mips/kernel/irq-gic.c b/arch/mips/kernel/irq-gic.c
+--- a/arch/mips/kernel/irq-gic.c	2014-01-29 17:21:34.000000000 +0800
++++ b/arch/mips/kernel/irq-gic.c	2014-01-29 17:24:43.000000000 +0800
+@@ -219,7 +219,9 @@
+ 
+ 	/* Assumption : cpumask refers to a single CPU */
+ 	spin_lock_irqsave(&gic_lock, flags);
++#ifdef CONFIG_MIPS_MT
+ 	for (;;) {
++#endif
+ 		/* Re-route this IRQ */
+ 		GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
+ 
+@@ -227,8 +229,9 @@
+ 		for (i = 0; i < NR_CPUS; i++)
+ 			clear_bit(irq, pcpu_masks[i].pcpu_mask);
+ 		set_bit(irq, pcpu_masks[first_cpu(tmp)].pcpu_mask);
+-
++#ifdef CONFIG_MIPS_MT
+ 	}
++#endif
+ 	cpumask_copy(d->affinity, cpumask);
+ 	spin_unlock_irqrestore(&gic_lock, flags);
+ 
+diff -urN a/arch/mips/kernel/smp-cmp.c b/arch/mips/kernel/smp-cmp.c
+--- a/arch/mips/kernel/smp-cmp.c	2014-01-29 17:21:45.000000000 +0800
++++ b/arch/mips/kernel/smp-cmp.c	2014-01-29 17:24:52.000000000 +0800
+@@ -194,7 +194,9 @@
+ 	 * FIXME: some of these options are per-system, some per-core and
+ 	 * some per-cpu
+ 	 */
++#ifdef CONFIG_MIPS_MT 
+ 	mips_mt_set_cpuoptions();
++#endif
+ }
+ 
+ struct plat_smp_ops cmp_smp_ops = {

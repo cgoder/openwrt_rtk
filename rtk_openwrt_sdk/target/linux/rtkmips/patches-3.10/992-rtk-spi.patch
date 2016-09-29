@@ -1,0 +1,324 @@
+diff -urN orig/drivers/mtd/mtd_blkdevs.c patch/drivers/mtd/mtd_blkdevs.c
+--- orig/drivers/mtd/mtd_blkdevs.c	2015-03-12 13:30:26.000000000 +0800
++++ patch/drivers/mtd/mtd_blkdevs.c	2015-03-12 13:30:36.000000000 +0800
+@@ -33,6 +33,9 @@
+ #include <linux/init.h>
+ #include <linux/mutex.h>
+ #include <asm/uaccess.h>
++#include <linux/kthread.h>
++#include <linux/delay.h>
++#include <linux/rcupdate.h>
+ 
+ #include "mtdcore.h"
+ 
+@@ -102,12 +105,18 @@
+ 			if (tr->readsect(dev, block, buf))
+ 				return -EIO;
+ 		rq_flush_dcache_pages(req);
++#ifdef CONFIG_RTL_8198C
++		__flush_cache_all();
++#endif
+ 		return 0;
+ 	case WRITE:
+ 		if (!tr->writesect)
+ 			return -EIO;
+ 
+ 		rq_flush_dcache_pages(req);
++#ifdef CONFIG_RTL_8198C
++		__flush_cache_all();
++#endif
+ 		for (; nsect > 0; nsect--, block++, buf += tr->blksize)
+ 			if (tr->writesect(dev, block, buf))
+ 				return -EIO;
+@@ -120,9 +129,209 @@
+ 
+ int mtd_blktrans_cease_background(struct mtd_blktrans_dev *dev)
+ {
++#ifdef CONFIG_RTL_8198C
++	if (kthread_should_stop())
++		return 1;
++#else
+ 	return dev->bg_stop;
++#endif
+ }
+ EXPORT_SYMBOL_GPL(mtd_blktrans_cease_background);
++#ifdef CONFIG_RTL_8198C
++#define MAX_RT_PRIO 70
++static int mtd_blktrans_thread(void *arg)
++{
++	struct mtd_blktrans_dev *dev = arg;
++	//struct mtd_blktrans_dev *dev =
++		//container_of(work, struct mtd_blktrans_dev, work);
++	struct mtd_blktrans_ops *tr = dev->tr;
++	struct request_queue *rq = dev->rq;
++	struct request *req = NULL;
++	int background_done = 0;
++	int count=0;
++	unsigned long flag=0;
++	struct task_struct *TSK; 
++	 struct sched_param PARAM = {.sched_priority = MAX_RT_PRIO }; 
++	 TSK = current; 
++
++	 
++	 PARAM.sched_priority = 55; 
++	 sched_setscheduler(TSK, SCHED_FIFO, &PARAM); // <-- unknown symbol?? 
++
++
++	
++	spin_lock_irq(rq->queue_lock);
++
++
++	while (!kthread_should_stop()) {
++		int res;
++
++		dev->bg_stop = false;
++		if (!req && !(req = blk_fetch_request(rq)) ) {
++			if (tr->background && !background_done) {				
++			//if ( !background_done) {
++				spin_unlock_irqrestore(rq->queue_lock,flag);
++				mutex_lock(&dev->lock);
++				tr->background(dev);
++				mutex_unlock(&dev->lock);
++				spin_lock_irqsave(rq->queue_lock,flag);	
++				/*
++				 * Do background processing just once per idle
++				 * period.
++				 */
++				background_done = !dev->bg_stop;
++
++	 #if 0
++                 __asm__ __volatile__(  \
++                ".set   push\n\t"       \
++                ".set   noreorder\n\t"  \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++		 "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                ".set   pop\n\t");
++                #endif
++
++	cond_resched();
++ #if 0
++                 __asm__ __volatile__(  \
++                ".set   push\n\t"       \
++                ".set   noreorder\n\t"  \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                 "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                ".set   pop\n\t");
++                #endif
++
++
++//		printk("");
++//		printk("");
++
++				continue;
++			}
++			
++			set_current_state(TASK_INTERRUPTIBLE);
++
++			if (kthread_should_stop())
++				set_current_state(TASK_RUNNING);
++
++			spin_unlock_irqrestore(rq->queue_lock,flag);
++	
++ #if 0
++                 __asm__ __volatile__(  \
++                ".set   push\n\t"       \
++                ".set   noreorder\n\t"  \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                 "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                ".set   pop\n\t");
++                #endif
++
++
++
++	
++			schedule();
++	 #if 0
++                 __asm__ __volatile__(  \
++                ".set   push\n\t"       \
++                ".set   noreorder\n\t"  \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++		 "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                "nop\n\t"               \
++                ".set   pop\n\t");
++                #endif
++
++		//printk("");
++		//printk("");
++			spin_lock_irqsave(rq->queue_lock,flag);
++			continue;
++			//break;
++		}
++
++		//spin_unlock_irq(rq->queue_lock);
++		spin_unlock_irqrestore(rq->queue_lock,flag);
++
++		mutex_lock(&dev->lock);
++		res = do_blktrans_request(dev->tr, dev, req);
++		mutex_unlock(&dev->lock);
++
++		//spin_lock_irq(rq->queue_lock);
++		spin_lock_irqsave(rq->queue_lock,flag);
++
++		if (!__blk_end_request_cur(req, res))
++			req = NULL;
++
++		background_done = 0;
++		
++	}
++
++	if (req)
++		__blk_end_request_all(req, -EIO);
++
++	//spin_unlock_irq(rq->queue_lock);
++	spin_unlock_irqrestore(rq->queue_lock,flag);
++		
++}
++#else
+ 
+ static void mtd_blktrans_work(struct work_struct *work)
+ {
+@@ -175,6 +384,7 @@
+ 
+ 	spin_unlock_irq(rq->queue_lock);
+ }
++#endif
+ 
+ static void mtd_blktrans_request(struct request_queue *rq)
+ {
+@@ -186,8 +396,16 @@
+ 	if (!dev)
+ 		while ((req = blk_fetch_request(rq)) != NULL)
+ 			__blk_end_request_all(req, -ENODEV);
+-	else
++		else 
++#ifdef CONFIG_RTL_8198C
++       {
++		dev->bg_stop = true;
++		wake_up_process(dev->thread);
++	}
++#else
++
+ 		queue_work(dev->wq, &dev->work);
++#endif
+ }
+ 
+ static int blktrans_open(struct block_device *bdev, fmode_t mode)
+@@ -420,7 +638,16 @@
+ 	}
+ 
+ 	gd->queue = new->rq;
++#ifdef CONFIG_RTL_8198C
++		/* Create processing thread */
++		/* TODO: workqueue ? */
++		new->thread = kthread_run(mtd_blktrans_thread, new,
++				"%s%d", tr->name, new->mtd->index);
++		if (IS_ERR(new->thread)) {
++			ret = PTR_ERR(new->thread);
++		}
+ 
++#else
+ 	/* Create processing workqueue */
+ 	new->wq = alloc_workqueue("%s%d", 0, 0,
+ 				  tr->name, new->mtd->index);
+@@ -428,6 +655,10 @@
+ 		goto error4;
+ 	INIT_WORK(&new->work, mtd_blktrans_work);
+ 
++#endif
++
++
++
+ 	gd->driverfs_dev = &new->mtd->dev;
+ 
+ 	if (new->readonly)
+@@ -467,9 +698,12 @@
+ 	/* Stop new requests to arrive */
+ 	del_gendisk(old->disk);
+ 
++	/* Stop the thread */
++	kthread_stop(old->thread);
++#ifndef CONFIG_RTL_8198C
+ 	/* Stop workqueue. This will perform any pending request. */
+ 	destroy_workqueue(old->wq);
+-
++#endif
+ 	/* Kill current requests */
+ 	spin_lock_irqsave(&old->queue_lock, flags);
+ 	old->rq->queuedata = NULL;
+diff -urN orig/include/linux/mtd/blktrans.h patch/include/linux/mtd/blktrans.h
+--- orig/include/linux/mtd/blktrans.h	2015-03-12 13:28:56.000000000 +0800
++++ patch/include/linux/mtd/blktrans.h	2015-03-12 13:28:49.000000000 +0800
+@@ -44,7 +44,10 @@
+ 	struct kref ref;
+ 	struct gendisk *disk;
+ 	struct attribute_group *disk_attributes;
++#ifndef CONFIG_RTL_8198C
+ 	struct workqueue_struct *wq;
++#endif
++	struct task_struct *thread;
+ 	struct work_struct work;
+ 	struct request_queue *rq;
+ 	spinlock_t queue_lock;

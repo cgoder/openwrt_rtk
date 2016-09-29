@@ -1,0 +1,18 @@
+diff -urN a/drivers/net/Kconfig b/drivers/net/Kconfig
+--- a/drivers/net/Kconfig	2013-12-23 11:30:03.000000000 +0800
++++ b/drivers/net/Kconfig	2013-12-23 11:31:53.000000000 +0800
+@@ -355,5 +355,6 @@
+ 	  module will be called vmxnet3.
+ 
+ source "drivers/net/hyperv/Kconfig"
++source "drivers/net/rtl819x/Kconfig"
+ 
+ endif # NETDEVICES
+diff -urN a/drivers/net/Makefile b/drivers/net/Makefile
+--- a/drivers/net/Makefile	2013-12-23 11:30:12.000000000 +0800
++++ b/drivers/net/Makefile	2013-12-23 11:32:45.000000000 +0800
+@@ -72,3 +72,4 @@
+ 
+ obj-$(CONFIG_HYPERV_NET) += hyperv/
+ obj-$(CONFIG_NTB_NETDEV) += ntb_netdev.o
++obj-$(CONFIG_RTL_819X_SWCORE) += rtl819x/

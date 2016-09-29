@@ -1,0 +1,17 @@
+diff -urN hostapd-2014-06-03.1_orig/hostapd/ctrl_iface.c hostapd-2014-06-03.1_patch/hostapd/ctrl_iface.c
+--- hostapd-2014-06-03.1_orig/hostapd/ctrl_iface.c	2015-07-02 15:47:39.001875732 +0800
++++ hostapd-2014-06-03.1_patch/hostapd/ctrl_iface.c	2015-07-02 15:47:29.753876096 +0800
+@@ -198,9 +198,11 @@
+ 			conf->secondary_channel = atoi(val);
+ 		else if ((val = get_option(opt, "hw_mode=")))
+ 			conf->hw_mode = atoi(val);
+-		else if ((val = get_option(opt, "ieee80211n=")))
++		else if ((val = get_option(opt, "ieee80211n="))) {
+ 			conf->ieee80211n = atoi(val);
+-		else
++			if(conf->ieee80211n == 0)
++				conf->ieee80211ac = 0;
++		} else
+ 			break;
+ 	}
+ 

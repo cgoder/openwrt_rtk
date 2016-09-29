@@ -1,0 +1,41 @@
+diff -urN a/arch/mips/Kbuild.platforms b/arch/mips/Kbuild.platforms
+--- a/arch/mips/Kbuild.platforms	2014-01-23 17:13:52.000000000 +0800
++++ b/arch/mips/Kbuild.platforms	2014-01-23 17:17:36.000000000 +0800
+@@ -31,6 +31,7 @@
+ platforms += txx9
+ platforms += vr41xx
+ platforms += wrppmc
++platforms += realtek
+ 
+ # include the platform specific files
+ include $(patsubst %, $(srctree)/arch/mips/%/Platform, $(platforms))
+diff -urN a/arch/mips/Kconfig b/arch/mips/Kconfig
+--- a/arch/mips/Kconfig	2014-01-23 17:13:42.000000000 +0800
++++ b/arch/mips/Kconfig	2014-01-23 17:17:27.000000000 +0800
+@@ -445,6 +445,18 @@
+ 	select HAVE_MACH_CLKDEV
+ 	select CLKDEV_LOOKUP
+ 
++config REALTEK
++        bool "Realtek mips based machines"
++        select CEVT_R4K
++        select CSRC_R4K
++        select DMA_NONCOHERENT
++        select IRQ_CPU
++        select SYS_HAS_CPU_MIPS32_R2
++        select SYS_SUPPORTS_32BIT_KERNEL
++	select SYS_SUPPORTS_BIG_ENDIAN
++        select SYS_HAS_EARLY_PRINTK
++
++
+ config SGI_IP22
+ 	bool "SGI IP22 (Indy/Indigo2)"
+ 	select FW_ARC
+@@ -857,6 +869,8 @@
+ source "arch/mips/loongson/Kconfig"
+ source "arch/mips/loongson1/Kconfig"
+ source "arch/mips/netlogic/Kconfig"
++source "arch/mips/realtek/Kconfig"
++
+ 
+ endmenu

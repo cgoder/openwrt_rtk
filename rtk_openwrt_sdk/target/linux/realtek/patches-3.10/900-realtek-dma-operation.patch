@@ -1,0 +1,13 @@
+diff -urN a/arch/mips/mm/cache.c b/arch/mips/mm/cache.c
+--- a/arch/mips/mm/cache.c	2014-03-13 13:19:26.000000000 +0800
++++ b/arch/mips/mm/cache.c	2014-03-13 13:20:21.000000000 +0800
+@@ -59,7 +59,8 @@
+ void (*_dma_cache_inv)(unsigned long start, unsigned long size);
+ 
+ EXPORT_SYMBOL(_dma_cache_wback_inv);
+-
++EXPORT_SYMBOL(_dma_cache_wback);
++EXPORT_SYMBOL(_dma_cache_inv);
+ #endif /* CONFIG_DMA_NONCOHERENT */
+ 
+ /*

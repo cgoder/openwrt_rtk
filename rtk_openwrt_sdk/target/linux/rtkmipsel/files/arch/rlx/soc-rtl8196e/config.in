@@ -1,0 +1,29 @@
+#
+# Board Configuration
+#
+menu "Board Configuration"
+
+choice
+	prompt "Board"
+	default RTL_8196E_GW
+
+config RTL_8196E_GW
+	bool "96E GW"
+	#select FPGA_PLATFORM
+	select RTL_8196E
+	select RTL_SDRAM_GE_32M
+	select RTL819X_SPI_FLASH
+	select AUTO_PCIE_PHY_SCAN
+	select RTL_NETDEV_NO_PRIV
+    select CONFIG_RTL_USB_OTG
+	select ARCH_BUS_USB
+	select BSP_ENABLE_USB
+	select USB_ARCH_HAS_EHCI
+	select USB_ARCH_HAS_OHCI
+	help
+		This enables support for Realtek RTL8196E demo board
+
+endchoice
+
+endmenu
+

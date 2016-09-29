@@ -1,0 +1,408 @@
+Index: linux-3.10.49/crypto/aes_generic.c
+===================================================================
+--- linux-3.10.49.orig/crypto/aes_generic.c
++++ linux-3.10.49/crypto/aes_generic.c
+@@ -1199,6 +1199,42 @@ EXPORT_SYMBOL_GPL(crypto_il_tab);
+ 	ctx->key_enc[8 * i + 15] = t;			\
+ } while (0)
+ 
++#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++static int rtl_aes_set_cbckey(struct crypto_tfm *tfm, const u8 *key,
++			   unsigned int keylen)
++{
++	struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = ctx->cbc_key;
++		
++	if (!tfm || !key){
++		return -EINVAL;
++	}
++		
++	memset((void *)tmpkey, 0x00, AES_MAX_KEY_SIZE);
++	memcpy((void *)tmpkey, (void *)key, keylen);	
++	return 0;
++}
++
++int rtl_aes_get_cbckey(struct crypto_tfm *tfm, const u8 *key, u32 *keylen)
++{
++	struct crypto_aes_ctx *ctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = ctx->cbc_key;
++	
++	int i = 0;
++	
++	if (!tfm || !key || !keylen){
++		return -EINVAL;
++	}
++	
++	memcpy((void *)key, (void *)tmpkey, ctx->key_length);
++	*keylen = ctx->key_length;
++	
++	
++	return 0;
++}
++EXPORT_SYMBOL(rtl_aes_get_cbckey);
++#endif
++
+ /**
+  * crypto_aes_expand_key - Expands the AES key as described in FIPS-197
+  * @ctx:	The location where the computed key will be stored.
+@@ -1287,6 +1323,11 @@ int crypto_aes_set_key(struct crypto_tfm
+ 	int ret;
+ 
+ 	ret = crypto_aes_expand_key(ctx, in_key, key_len);
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	if (!ret){
++		rtl_aes_set_cbckey(tfm, in_key, key_len);
++	}
++	#endif
+ 	if (!ret)
+ 		return 0;
+ 
+Index: linux-3.10.49/crypto/cbc.c
+===================================================================
+--- linux-3.10.49.orig/crypto/cbc.c
++++ linux-3.10.49/crypto/cbc.c
+@@ -21,6 +21,18 @@
+ 
+ #ifdef CONFIG_CRYPTO_DEV_REALTEK
+ #include "../drivers/crypto/realtek/rtl_crypto_helper.h"
++
++#define AES_MAX_KEY_SIZE	32
++#define DES_KEY_SIZE		8
++#define DES3_EDE_KEY_SIZE	(3 * DES_KEY_SIZE)
++
++#define CBC_3DES_NAME		"cbc(des3_ede)"
++#define CBC_DES_NAME		"cbc(des)"
++#define CBC_AES_NAME		"cbc(aes)"
++
++extern int rtl_des3_ede_get_cbckey(struct crypto_tfm *tfm, const u8 *key,unsigned int keylen);
++extern int rtl_aes_get_cbckey(struct crypto_tfm *tfm, const u8 *key, u32 *keylen);
++extern int rtl_des_get_cbckey(struct crypto_tfm *tfm, const u8 *key, unsigned int keylen);
+ #endif // CONFIG_CRYPTO_DEV_REALTEK
+ struct crypto_cbc_ctx {
+ 	struct crypto_cipher *child;
+@@ -108,6 +120,29 @@ static int crypto_cbc_encrypt(struct blk
+ 	struct crypto_cipher *child = ctx->child;
+ 	int err;
+ 
++#if defined(CONFIG_CRYPTO_DEV_REALTEK)	
++	struct rtl_cipher_ctx *rtl_tmp_ctx = &ctx->rtl_ctx;	
++	const char *algname = crypto_tfm_alg_name(tfm);
++	u8	aes_cbc_key[AES_MAX_KEY_SIZE] = {0};
++	u32 keylen = 0;
++	
++	if (algname){
++		//printk("%s %d algname=%s tfm=0x%p\n", __FUNCTION__, __LINE__, algname, tfm);
++		if (memcmp(algname, CBC_3DES_NAME, strlen(CBC_3DES_NAME)) == 0){
++			rtl_des3_ede_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES3_EDE_KEY_SIZE);
++		}
++		else if (memcmp(algname, CBC_DES_NAME, strlen(CBC_DES_NAME)) == 0){
++			rtl_des_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES_KEY_SIZE);
++		}
++		else if (memcmp(algname, CBC_AES_NAME, strlen(CBC_AES_NAME)) == 0){
++			err = rtl_aes_get_cbckey((struct crypto_tfm *)child, aes_cbc_key, &keylen);
++			if (err == 0){
++				rtl_cipher_setkey(child, &ctx->rtl_ctx, aes_cbc_key, keylen);
++			}
++		}
++	}
++#endif
++
+ 	blkcipher_walk_init(&walk, dst, src, nbytes);
+ 	err = blkcipher_walk_virt(desc, &walk);
+ 
+@@ -220,6 +255,28 @@ static int crypto_cbc_decrypt(struct blk
+ 	struct crypto_cbc_ctx *ctx = crypto_blkcipher_ctx(tfm);
+ 	struct crypto_cipher *child = ctx->child;
+ 	int err;
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)	
++	struct rtl_cipher_ctx *rtl_tmp_ctx = &ctx->rtl_ctx;
++	const char *algname = crypto_tfm_alg_name(tfm);
++	u8	aes_cbc_key[AES_MAX_KEY_SIZE] = {0};
++	u32 keylen = 0;
++	
++	if (algname){
++		//printk("%s %d algname=%s tfm=0x%p\n", __FUNCTION__, __LINE__, algname, tfm);
++		if (memcmp(algname, CBC_3DES_NAME, strlen(CBC_3DES_NAME)) == 0){
++			rtl_des3_ede_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES3_EDE_KEY_SIZE);
++		}
++		else if (memcmp(algname, CBC_DES_NAME, strlen(CBC_DES_NAME)) == 0){
++			rtl_des_get_cbckey((struct crypto_tfm *)child, rtl_tmp_ctx->key, DES_KEY_SIZE);
++		}
++		else if (memcmp(algname, CBC_AES_NAME, strlen(CBC_AES_NAME)) == 0){
++			err = rtl_aes_get_cbckey((struct crypto_tfm *)child, aes_cbc_key, &keylen);
++			if (err == 0){
++				rtl_cipher_setkey(child, &ctx->rtl_ctx, aes_cbc_key, keylen);
++			}
++		}
++	}
++	#endif
+ 
+ 	blkcipher_walk_init(&walk, dst, src, nbytes);
+ 	err = blkcipher_walk_virt(desc, &walk);
+@@ -250,7 +307,7 @@ static int crypto_cbc_decrypt(struct blk
+ 			// cbc mode update			
+ 			if (walk.src.virt.addr == walk.dst.virt.addr)
+ 			{
+-				walk.src.virt.addr -= (walk.nbytes - nbytes);				
++				walk.src.virt.addr += (walk.nbytes - nbytes);	
+ 				memcpy(walk.iv, last_iv, bsize);
+ 			}
+ 			else
+Index: linux-3.10.49/crypto/des_generic.c
+===================================================================
+--- linux-3.10.49.orig/crypto/des_generic.c
++++ linux-3.10.49/crypto/des_generic.c
+@@ -27,10 +27,16 @@
+ 
+ struct des_ctx {
+ 	u32 expkey[DES_EXPKEY_WORDS];
++#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	u8 cbckey[DES_KEY_SIZE];
++#endif
+ };
+ 
+ struct des3_ede_ctx {
+ 	u32 expkey[DES3_EDE_EXPKEY_WORDS];
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	u8 cbckey[DES3_EDE_KEY_SIZE];
++	#endif
+ };
+ 
+ /* Lookup tables for key expansion */
+@@ -778,6 +784,79 @@ static void dkey(u32 *pe, const u8 *k)
+ 	}
+ }
+ 
++#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++
++
++static int rtl_des_set_cbckey(struct crypto_tfm *tfm, const u8 *key,
++			   unsigned int keylen)
++{
++	struct des_ctx *dctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = dctx->cbckey;
++	
++	if (!tfm || !key){
++		return -EINVAL;
++	}
++	
++	memset((void *)tmpkey, 0x00, DES_KEY_SIZE);
++	memcpy((void *)tmpkey, (void *)key, keylen);
++		
++	return 0;
++}
++
++int rtl_des_get_cbckey(struct crypto_tfm *tfm, const u8 *key,
++			   unsigned int keylen)
++{
++	struct des_ctx *dctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = dctx->cbckey;
++	
++	int i = 0;
++	
++	if (!tfm || !key){
++		return -EINVAL;
++	}
++
++	memcpy((void *)key, (void *)tmpkey, keylen);
++	
++	return 0;
++}
++
++static int rtl_des3_ede_set_cbckey(struct crypto_tfm *tfm, const u8 *key,
++			   unsigned int keylen)
++{
++	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = dctx->cbckey;
++	
++	if (!tfm || !key){
++		return -EINVAL;
++	}
++		
++	memset((void *)tmpkey, 0x00, DES3_EDE_KEY_SIZE);
++	memcpy((void *)tmpkey, (void *)key, keylen);	
++	
++	return 0;
++}
++
++int rtl_des3_ede_get_cbckey(struct crypto_tfm *tfm, const u8 *key,
++			   unsigned int keylen)
++{
++	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
++	u8 *tmpkey = dctx->cbckey;
++	
++	int i = 0;
++	
++	if (!tfm || !key){
++		return -EINVAL;
++	}
++
++	memcpy((void *)key, (void *)tmpkey, keylen);
++	
++	return 0;
++}
++
++EXPORT_SYMBOL(rtl_des3_ede_get_cbckey);
++EXPORT_SYMBOL(rtl_des_get_cbckey);
++#endif
++
+ static int des_setkey(struct crypto_tfm *tfm, const u8 *key,
+ 		      unsigned int keylen)
+ {
+@@ -797,6 +876,10 @@ static int des_setkey(struct crypto_tfm 
+ 	/* Copy to output */
+ 	memcpy(dctx->expkey, tmp, sizeof(dctx->expkey));
+ 
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	rtl_des_set_cbckey(tfm, key, keylen);
++	#endif	
++
+ 	return 0;
+ }
+ 
+@@ -866,6 +949,9 @@ static int des3_ede_setkey(struct crypto
+ 	struct des3_ede_ctx *dctx = crypto_tfm_ctx(tfm);
+ 	u32 *expkey = dctx->expkey;
+ 	u32 *flags = &tfm->crt_flags;
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	u8 *tmp_key = key;
++	#endif
+ 
+ 	if (unlikely(!((K[0] ^ K[2]) | (K[1] ^ K[3])) ||
+ 		     !((K[2] ^ K[4]) | (K[3] ^ K[5]))) &&
+@@ -877,6 +963,10 @@ static int des3_ede_setkey(struct crypto
+ 	des_ekey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
+ 	dkey(expkey, key); expkey += DES_EXPKEY_WORDS; key += DES_KEY_SIZE;
+ 	des_ekey(expkey, key);
++	
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	rtl_des3_ede_set_cbckey(tfm, tmp_key, keylen);
++	#endif	
+ 
+ 	return 0;
+ }
+Index: linux-3.10.49/include/crypto/aes.h
+===================================================================
+--- linux-3.10.49.orig/include/crypto/aes.h
++++ linux-3.10.49/include/crypto/aes.h
+@@ -24,7 +24,10 @@
+ struct crypto_aes_ctx {
+ 	u32 key_enc[AES_MAX_KEYLENGTH_U32];
+ 	u32 key_dec[AES_MAX_KEYLENGTH_U32];
+-	u32 key_length;
++	u32 key_length;	
++	#if defined(CONFIG_CRYPTO_DEV_REALTEK)
++	u8  cbc_key[AES_MAX_KEY_SIZE];
++	#endif
+ };
+ 
+ extern const u32 crypto_ft_tab[4][256];
+Index: linux-3.10.49/net/ipv4/ah4.c
+===================================================================
+--- linux-3.10.49.orig/net/ipv4/ah4.c
++++ linux-3.10.49/net/ipv4/ah4.c
+@@ -12,6 +12,16 @@
+ #include <linux/scatterlist.h>
+ #include <net/icmp.h>
+ #include <net/protocol.h>
++#ifdef CONFIG_CRYPTO_DEV_REALTEK_TEST
++#include <net/rtl/rtl_types.h>
++#include <net/rtl/rtl_glue.h>
++
++#include "../../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
++//#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
++
++extern int lock_ipsec_owner;
++extern spinlock_t lock_ipsec_engine;
+ 
+ struct ah_skb_cb {
+ 	struct xfrm_skb_cb xfrm;
+@@ -162,7 +172,7 @@ static int ah_output(struct xfrm_state *
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-
++	SMP_LOCK_IPSEC;
+ 	skb_push(skb, -skb_network_offset(skb));
+ 	ah = ip_auth_hdr(skb);
+ 	ihl = ip_hdrlen(skb);
+@@ -241,6 +251,7 @@ static int ah_output(struct xfrm_state *
+ out_free:
+ 	kfree(iph);
+ out:
++	SMP_UNLOCK_IPSEC;
+ 	return err;
+ }
+ 
+@@ -330,7 +341,7 @@ static int ah_input(struct xfrm_state *x
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-
++	SMP_LOCK_IPSEC;
+ 	ah = (struct ip_auth_hdr *)skb->data;
+ 	iph = ip_hdr(skb);
+ 	ihl = ip_hdrlen(skb);
+@@ -394,6 +405,7 @@ static int ah_input(struct xfrm_state *x
+ out_free:
+ 	kfree (work_iph);
+ out:
++	SMP_UNLOCK_IPSEC;
+ 	return err;
+ }
+ 
+Index: linux-3.10.49/net/ipv4/esp4.c
+===================================================================
+--- linux-3.10.49.orig/net/ipv4/esp4.c
++++ linux-3.10.49/net/ipv4/esp4.c
+@@ -17,6 +17,15 @@
+ #include <net/icmp.h>
+ #include <net/protocol.h>
+ #include <net/udp.h>
++#ifdef CONFIG_CRYPTO_DEV_REALTEK_TEST
++#include <net/rtl/rtl_types.h>
++#include <net/rtl/rtl_glue.h>
++
++#include "../../drivers/crypto/realtek/crypto_engine/rtl_ipsec.h"
++//#include "../../drivers/crypto/realtek/rtl_crypto_helper.h"
++#endif // CONFIG_CRYPTO_DEV_REALTEK
++extern int lock_ipsec_owner;
++extern spinlock_t lock_ipsec_engine;
+ 
+ struct esp_skb_cb {
+ 	struct xfrm_skb_cb xfrm;
+@@ -138,7 +147,7 @@ static int esp_output(struct xfrm_state 
+ 	__be32 *seqhi;
+ 
+ 	/* skb is pure payload to encrypt */
+-
++	SMP_LOCK_IPSEC;
+ 	esp = x->data;
+ 	aead = esp->aead;
+ 	alen = crypto_aead_authsize(aead);
+@@ -273,6 +282,7 @@ static int esp_output(struct xfrm_state 
+ 	kfree(tmp);
+ 
+ error:
++	SMP_UNLOCK_IPSEC;
+ 	return err;
+ }
+ 
+@@ -401,7 +411,7 @@ static int esp_input(struct xfrm_state *
+ 	if ((err = skb_cow_data(skb, 0, &trailer)) < 0)
+ 		goto out;
+ 	nfrags = err;
+-
++	SMP_LOCK_IPSEC;
+ 	assoclen = sizeof(*esph);
+ 	sglists = 1;
+ 	seqhilen = 0;
+@@ -454,6 +464,7 @@ static int esp_input(struct xfrm_state *
+ 	err = esp_input_done2(skb, err);
+ 
+ out:
++	SMP_UNLOCK_IPSEC;
+ 	return err;
+ }
+ 

@@ -1,0 +1,8 @@
+--- smb.conf.template	2015-07-10 18:00:29.467950589 +0800
++++ smb.conf.template_tmp	2015-07-10 18:00:40.719820477 +0800
+@@ -31,4 +31,5 @@
+ 	syslog = 2
+ 	use sendfile = yes
+ 	writeable = yes
++	sync always = yes
+ 	

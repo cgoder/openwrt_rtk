@@ -1,0 +1,541 @@
+--- a/include/linux/netfilter_ipv4/ip_tables.h
++++ b/include/linux/netfilter_ipv4/ip_tables.h
+@@ -90,4 +90,13 @@ compat_ipt_get_target(struct compat_ipt_
+ }
+ 
+ #endif /* CONFIG_COMPAT */
++
++#if defined (CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_NETFILTER)
++extern unsigned int (*IgmpRxFilter_Hook)(struct sk_buff *skb,
++	     unsigned int hook,
++	     const struct net_device *in,
++	     const struct net_device *out,
++	     struct xt_table *table);
++#endif
++
+ #endif /* _IPTABLES_H */
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -503,6 +503,10 @@ struct sk_buff {
+ #if defined(CONFIG_RTL_HW_QOS_SUPPORT)&&defined(CONFIG_OPENWRT_SDK)
+ 	__u32 bypass_connmark;
+ #endif
++#if defined( CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL865X_LANPORT_RESTRICTION) || defined(CONFIG_RTL_IGMP_PROXY)
++	__u16			srcPort;
++	__u16			srcVlanId:12;
++#endif
+ 	union {
+ 		__u32		mark;
+ 		__u32		dropcount;
+--- a/net/bridge/br.c
++++ b/net/bridge/br.c
+@@ -22,6 +22,10 @@
+ 
+ #include "br_private.h"
+ 
++#ifdef CONFIG_RTL_IGMP_SNOOPING
++#include <net/rtl/features/rtl_igmp_ps_hook.h>
++#endif
++
+ static const struct stp_proto br_stp_proto = {
+ 	.rcv	= br_stp_rcv,
+ };
+@@ -66,6 +70,10 @@ static int __init br_init(void)
+ 	br_fdb_test_addr_hook = br_fdb_test_addr;
+ #endif
+ 
++#if defined(CONFIG_RTL_IGMP_SNOOPING) && defined(CONFIG_PROC_FS)
++    rtl_IgmpSnooping_ProcCreate_hook();
++#endif
++
+ 	return 0;
+ err_out4:
+ 	unregister_netdevice_notifier(&br_device_notifier);
+@@ -82,6 +90,9 @@ err_out:
+ 
+ static void __exit br_deinit(void)
+ {
++#if defined(CONFIG_RTL_IGMP_SNOOPING) && defined(CONFIG_PROC_FS)
++    rtl_IgmpSnooping_ProcDestroy_hook();
++#endif
+ 	stp_proto_unregister(&br_stp_proto);
+ 
+ 	br_netlink_fini();
+--- a/net/bridge/br_device.c
++++ b/net/bridge/br_device.c
+@@ -22,6 +22,10 @@
+ #include <asm/uaccess.h>
+ #include "br_private.h"
+ 
++#ifdef CONFIG_RTL_IGMP_SNOOPING
++#include <net/rtl/features/rtl_igmp_ps_hook.h>
++#endif
++
+ /* net device transmit always called with BH disabled */
+ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+@@ -61,6 +65,10 @@ netdev_tx_t br_dev_xmit(struct sk_buff *
+ 			br_flood_deliver(br, skb);
+ 			goto out;
+ 		}
++	#if defined (CONFIG_RTL_IGMP_SNOOPING)
++		if(rtl_IgmpSnooping_BrXmit_Hook(br,dest,skb)==1)
++			goto out;
++	#else
+ 		if (br_multicast_rcv(br, NULL, skb)) {
+ 			kfree_skb(skb);
+ 			goto out;
+@@ -70,6 +78,7 @@ netdev_tx_t br_dev_xmit(struct sk_buff *
+ 		if ((mdst || BR_INPUT_SKB_CB_MROUTERS_ONLY(skb)) &&
+ 		    br_multicast_querier_exists(br, eth_hdr(skb)))
+ 			br_multicast_deliver(mdst, skb);
++	#endif
+ 		else
+ 			br_flood_deliver(br, skb);
+ 	} else if ((dst = __br_fdb_get(br, dest, vid)) != NULL)
+--- a/net/bridge/br_fdb.c
++++ b/net/bridge/br_fdb.c
+@@ -29,6 +29,9 @@
+ #if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
+ #include <net/rtl/features/rtl_ps_hooks.h>
+ #endif
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++#include <net/rtl/features/rtl_igmp_ps_hook.h>
++#endif
+ 
+ static struct kmem_cache *br_fdb_cache __read_mostly;
+ static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
+@@ -177,7 +180,11 @@ void br_fdb_cleanup(unsigned long _data)
+ {
+ 	struct net_bridge *br = (struct net_bridge *)_data;
+ 	unsigned long delay = hold_time(br);
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++	unsigned long next_timer = jiffies + br->forward_delay;
++#else
+ 	unsigned long next_timer = jiffies + br->ageing_time;
++#endif
+ 	int i;
+ 
+ 	spin_lock(&br->hash_lock);
+@@ -187,6 +194,9 @@ void br_fdb_cleanup(unsigned long _data)
+ 
+ 		hlist_for_each_entry_safe(f, n, &br->hash[i], hlist) {
+ 			unsigned long this_timer;
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++			rtl_igmp_fdb_delete_hook(br,f);
++#endif
+ 			if (f->is_static)
+ 				continue;
+ 			#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
+@@ -214,8 +224,11 @@ void br_fdb_flush(struct net_bridge *br)
+ 		struct net_bridge_fdb_entry *f;
+ 		struct hlist_node *n;
+ 		hlist_for_each_entry_safe(f, n, &br->hash[i], hlist) {
+-			if (!f->is_static)
+-				fdb_delete(br, f);
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++		rtl_igmp_fdb_delete_hook(br,f);
++#endif
++		if (!f->is_static)
++			fdb_delete(br, f);
+ 		}
+ 	}
+ 	spin_unlock_bh(&br->hash_lock);
+@@ -405,6 +418,9 @@ static struct net_bridge_fdb_entry *fdb_
+ 		fdb->is_local = 0;
+ 		fdb->is_static = 0;
+ 		fdb->updated = fdb->used = jiffies;
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++		rtl_igmp_fdb_create_hook(fdb);
++#endif
+ 		hlist_add_head_rcu(&fdb->hlist, head);
+ 	}
+ 	return fdb;
+@@ -415,8 +431,11 @@ static int fdb_insert(struct net_bridge
+ {
+ 	struct hlist_head *head = &br->hash[br_mac_hash(addr, vid)];
+ 	struct net_bridge_fdb_entry *fdb;
+-
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++    if(!is_igmp_valid_eth_addr(addr))
++#else
+ 	if (!is_valid_ether_addr(addr))
++#endif
+ 		return -EINVAL;
+ 
+ 	fdb = fdb_find(head, addr, vid);
+@@ -836,3 +855,10 @@ int br_fdb_delete(struct ndmsg *ndm, str
+ out:
+ 	return err;
+ }
++
++#if defined(CONFIG_RTL_IGMP_SNOOPING)
++void rtl_igmp_fdb_delete(struct net_bridge *br, struct net_bridge_fdb_entry *f)
++{
++	fdb_delete(br,f);
++}
++#endif
+--- a/net/bridge/br_forward.c
++++ b/net/bridge/br_forward.c
+@@ -194,6 +194,8 @@ static struct net_bridge_port *maybe_del
+ }
+ 
+ /* called under bridge lock */
++#ifndef CONFIG_RTL_IGMP_SNOOPING
++//define br_flood/br_flood_deliver/br_flood_forward outside
+ static void br_flood(struct net_bridge *br, struct sk_buff *skb,
+ 		     struct sk_buff *skb0,
+ 		     void (*__packet_hook)(const struct net_bridge_port *p,
+@@ -241,6 +243,7 @@ void br_flood_forward(struct net_bridge
+ {
+ 	br_flood(br, skb, skb2, __br_forward, true);
+ }
++#endif
+ 
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ /* called with rcu_read_lock */
+@@ -316,3 +319,39 @@ void br_multicast_forward(struct net_bri
+ 	br_multicast_flood(mdst, skb, skb2, __br_forward);
+ }
+ #endif
++
++#if defined(CONFIG_RTL_IGMP_SNOOPING)
++int rtl_should_deliver(const struct net_bridge_port *p,
++				 const struct sk_buff *skb)
++{
++	return should_deliver(p,skb);
++}
++
++struct net_bridge_port * rtl_maybe_deliver(
++	struct net_bridge_port *prev, struct net_bridge_port *p,
++	struct sk_buff *skb,
++	void (*__packet_hook)(const struct net_bridge_port *p,
++			      struct sk_buff *skb))
++{
++	return maybe_deliver(prev, p, skb, __packet_hook);
++}
++
++int rtl_deliver_clone(const struct net_bridge_port *prev,
++			 struct sk_buff *skb,
++			 void (*__packet_hook)(const struct net_bridge_port *p,
++					       struct sk_buff *skb))
++{
++	return deliver_clone(prev, skb, __packet_hook);
++}
++
++
++void __rtl_br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
++{
++	return __br_deliver(to, skb);
++}
++
++void __rtl_br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
++{
++	return __br_forward(to, skb);
++}
++#endif
+--- a/net/bridge/br_if.c
++++ b/net/bridge/br_if.c
+@@ -27,6 +27,10 @@
+ 
+ #include "br_private.h"
+ 
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++#include <net/rtl/features/rtl_igmp_ps_hook.h>
++#endif
++
+ /*
+  * Determine initial path cost based on speed.
+  * using recommendations from 802.1d standard
+@@ -249,6 +253,10 @@ int br_add_bridge(struct net *net, const
+ 	res = register_netdev(dev);
+ 	if (res)
+ 		free_netdev(dev);
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++	else
++		rtl_IgmpSnooping_BrInit_Hook(name,dev);
++#endif
+ 	return res;
+ }
+ 
+@@ -274,7 +282,9 @@ int br_del_bridge(struct net *net, const
+ 
+ 	else
+ 		br_dev_delete(dev, NULL);
+-
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++	rtl_IgmpSnooping_BrDeinit_Hook(name,ret);
++#endif
+ 	rtnl_unlock();
+ 	return ret;
+ }
+@@ -404,6 +414,10 @@ int br_add_if(struct net_bridge *br, str
+ 
+ 	kobject_uevent(&p->kobj, KOBJ_ADD);
+ 
++#if defined(CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_RTL_HARDWARE_MULTICAST)
++	rtl865x_HwMcast_Setting_HOOK(br, dev);
++#endif/*CONFIG_RTL_HARDWARE_MULTICAST*/
++
+ 	return 0;
+ 
+ err5:
+@@ -448,6 +462,10 @@ int br_del_if(struct net_bridge *br, str
+ 
+ 	netdev_update_features(br->dev);
+ 
++#if defined(CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_RTL_HARDWARE_MULTICAST)
++	rtl865x_HwMcast_Setting_HOOK(br,dev);
++#endif/*CONFIG_RTL_HARDWARE_MULTICAST*/
++
+ 	return 0;
+ }
+ 
+--- a/net/bridge/br_input.c
++++ b/net/bridge/br_input.c
+@@ -20,6 +20,10 @@
+ #include <linux/rculist.h>
+ #include "br_private.h"
+ 
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++#include <net/rtl/features/rtl_igmp_ps_hook.h>
++#endif
++
+ /* Hook for brouter */
+ br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;
+ EXPORT_SYMBOL(br_should_route_hook);
+@@ -101,6 +105,19 @@ int br_handle_frame_finish(struct sk_buf
+ 	} else if (is_broadcast_ether_addr(dest))
+ 		skb2 = skb;
+ 	else if (is_multicast_ether_addr(dest)) {
++#if defined  (CONFIG_RTL_IGMP_SNOOPING)
++		skb2 = skb;
++		int ret=rtl_IgmpSnooping_Input_Hook(br,skb,skb2);
++		if(ret==1){
++			//The packet has been forwarded in rtl_IgmpSnooping_Input_Hook
++			skb = NULL;
++		}
++		else if(ret==-1)
++		{
++		    //packets has been dropped
++			skb2 = skb = NULL;
++		}
++#else
+ 		mdst = br_mdb_get(br, skb, vid);
+ 		if ((mdst || BR_INPUT_SKB_CB_MROUTERS_ONLY(skb)) &&
+ 		    br_multicast_querier_exists(br, eth_hdr(skb))) {
+@@ -111,8 +128,13 @@ int br_handle_frame_finish(struct sk_buf
+ 			skb = NULL;
+ 			if (!skb2)
+ 				goto out;
+-		} else
++	    }
++#endif
++        else
++        {
++        	//packets should be forwarded and passed up
+ 			skb2 = skb;
++        }
+ 
+ 		br->dev->stats.multicast++;
+ 	} else if ((p->flags & BR_ISOLATE_MODE) ||
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -93,6 +93,23 @@ struct net_port_vlans {
+ 	u16				num_vlans;
+ };
+ 
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++#define FDB_IGMP_EXT_NUM 8
++struct fdb_igmp_ext_entry
++{
++	int valid;
++	unsigned long ageing_time;
++	unsigned char SrcMac[6];
++	unsigned char port;
++
++};
++
++struct fdb_igmp_ext_array
++{
++	struct fdb_igmp_ext_entry igmp_fdb_arr[FDB_IGMP_EXT_NUM];
++};
++#endif
++
+ struct net_bridge_fdb_entry
+ {
+ 	struct hlist_node		hlist;
+@@ -100,6 +117,13 @@ struct net_bridge_fdb_entry
+ 
+ 	struct rcu_head			rcu;
+ 	unsigned long			updated;
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++	unsigned short group_src;
++	unsigned char	igmpFlag;
++	unsigned char	portlist;
++	int  portUsedNum[8];	// be used with portlist, for record each port has how many client
++	struct fdb_igmp_ext_entry igmp_fdb_arr[FDB_IGMP_EXT_NUM];
++#endif
+ 	unsigned long			used;
+ 	mac_addr			addr;
+ 	unsigned char			is_local;
+@@ -304,6 +328,10 @@ struct net_bridge
+ 	u8				vlan_enabled;
+ 	struct net_port_vlans __rcu	*vlan_info;
+ #endif
++#if defined (CONFIG_RTL_IGMP_SNOOPING)
++	int igmpProxy_pid;
++	struct timer_list	mCastQuerytimer;
++#endif
+ };
+ 
+ struct br_input_skb_cb {
+@@ -573,17 +601,17 @@ static inline void br_multicast_open(str
+ static inline void br_multicast_stop(struct net_bridge *br)
+ {
+ }
+-
++#ifndef CONFIG_RTL_IGMP_SNOOPING
+ static inline void br_multicast_deliver(struct net_bridge_mdb_entry *mdst,
+ 					struct sk_buff *skb)
+ {
+ }
+-
+ static inline void br_multicast_forward(struct net_bridge_mdb_entry *mdst,
+ 					struct sk_buff *skb,
+ 					struct sk_buff *skb2)
+ {
+ }
++#endif
+ static inline bool br_multicast_is_router(struct net_bridge *br)
+ {
+ 	return 0;
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -253,6 +253,11 @@ struct sk_buff *__alloc_skb(unsigned int
+ 	skb->transport_header = ~0U;
+ #endif
+ 
++#ifdef CONFIG_RTL_HARDWARE_MULTICAST
++	skb->srcPort=0xFFFF;
++	skb->srcVlanId=0;
++#endif
++
+ 	/* make sure we initialize shinfo sequentially */
+ 	shinfo = skb_shinfo(skb);
+ 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
+@@ -719,6 +724,10 @@ static void __copy_skb_header(struct sk_
+ #if IS_ENABLED(CONFIG_NETFILTER_XT_TARGET_TRACE)
+ 	new->nf_trace		= old->nf_trace;
+ #endif
++#ifdef CONFIG_RTL_HARDWARE_MULTICAST
++	new->srcPort=old->srcPort;
++	new->srcVlanId=old->srcPort;
++#endif
+ #ifdef CONFIG_NET_SCHED
+ 	new->tc_index		= old->tc_index;
+ #ifdef CONFIG_NET_CLS_ACT
+@@ -756,6 +765,10 @@ static struct sk_buff *__skb_clone(struc
+ 	C(head_frag);
+ 	C(data);
+ 	C(truesize);
++#ifdef CONFIG_RTL_HARDWARE_MULTICAST
++	C(srcPort);
++	C(srcVlanId);
++#endif
+ 	atomic_set(&n->users, 1);
+ 
+ 	atomic_inc(&(skb_shinfo(skb)->dataref));
+--- a/net/ipv4/netfilter/ip_tables.c
++++ b/net/ipv4/netfilter/ip_tables.c
+@@ -2322,6 +2322,10 @@ static int __init ip_tables_init(void)
+ 	if (ret < 0)
+ 		goto err5;
+ 
++#if defined (CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_NETFILTER)
++	IgmpRxFilter_Hook = ipt_do_table;
++#endif
++
+ 	pr_info("(C) 2000-2006 Netfilter Core Team\n");
+ 	return 0;
+ 
+@@ -2342,6 +2346,9 @@ static void __exit ip_tables_fini(void)
+ 	xt_unregister_matches(ipt_builtin_mt, ARRAY_SIZE(ipt_builtin_mt));
+ 	xt_unregister_targets(ipt_builtin_tg, ARRAY_SIZE(ipt_builtin_tg));
+ 	unregister_pernet_subsys(&ip_tables_net_ops);
++#if defined (CONFIG_RTL_IGMP_SNOOPING) && defined (CONFIG_NETFILTER)
++	IgmpRxFilter_Hook = NULL;
++#endif
+ }
+ 
+ EXPORT_SYMBOL(ipt_register_table);
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -142,6 +142,11 @@ EXPORT_SYMBOL(dut_ip);
+ #include <net/rtl/features/rtl_ps_log.h>
+ #endif
+ 
++#if defined(CONFIG_RTL_IGMP_SNOOPING)
++extern int rtl865x_ipMulticastFastFwd_hook(struct sk_buff * skb);
++#endif
++
++
+ /* Instead of increasing this, you should create a hash table. */
+ #define MAX_GRO_SKBS 8
+ 
+@@ -3664,6 +3669,12 @@ static int __netif_receive_skb(struct sk
+ 		ret = __netif_receive_skb_core(skb, true);
+ 		tsk_restore_flags(current, pflags, PF_MEMALLOC);
+ 	} else {
++#if defined(CONFIG_RTL_IGMP_SNOOPING)
++	 	if(rtl865x_ipMulticastFastFwd_hook(skb)==0)
++        {
++             return NET_RX_SUCCESS;
++        }
++#endif
+ #if	defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+ 		extern unsigned int statistic_total;
+ 		extern unsigned int statistic_ps;
+--- a/net/ipv4/ipmr.c
++++ b/net/ipv4/ipmr.c
+@@ -2780,3 +2780,26 @@ reg_pernet_fail:
+ 	kmem_cache_destroy(mrt_cachep);
+ 	return err;
+ }
++
++#if defined(CONFIG_RTL_IGMP_SNOOPING)&&defined(CONFIG_RTL_IGMP_PROXY)
++struct mr_table *rtl_ipmr_get_table(struct net *net, u32 id)
++{
++	return ipmr_get_table(net, id);
++}
++
++struct mr_table *rtl_ipmr_rt_fib_lookup(struct net *net, struct sk_buff *skb)
++{
++ 	return ipmr_rt_fib_lookup(net, skb);
++}
++
++struct mfc_cache *rtl_ipmr_cache_find(struct mr_table *mrt, __be32 origin, __be32 mcastgrp)
++{
++	return ipmr_cache_find(mrt, origin, mcastgrp);
++}
++
++int rtl_ipmr_find_vif(struct mr_table *mrt, struct net_device *dev)
++{
++	return ipmr_find_vif(mrt, dev);
++}
++
++#endif
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -79,11 +79,6 @@ config RTL_L2TP_DIRECT_PPP_REPLY
+         depends on RTL_IPTABLES_FAST_PATH
+         default n
+ 	
+-config RTL_FASTPATH_HWNAT_SUPPORT_KERNEL_3_X
+-        bool "Realtek Fastpath and HwNat for kernel-3.x"
+-        depends on RTL_819X
+-        default y
+-
+ config RTL_SPEED_MONITOR
+         bool "Realtek dev stats speed monitor"
+         depends on RTL_819X

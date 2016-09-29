@@ -1,0 +1,206 @@
+--- a/net/bridge/br_fdb.c
++++ b/net/bridge/br_fdb.c
+@@ -26,6 +26,10 @@
+ #include <linux/if_vlan.h>
+ #include "br_private.h"
+ 
++#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
++#include <net/rtl/features/rtl_ps_hooks.h>
++#endif
++
+ static struct kmem_cache *br_fdb_cache __read_mostly;
+ static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
+ 		      const unsigned char *addr, u16 vid);
+@@ -185,6 +189,9 @@ void br_fdb_cleanup(unsigned long _data)
+ 			unsigned long this_timer;
+ 			if (f->is_static)
+ 				continue;
++			#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
++			rtl_br_fdb_cleanup_hooks(br,f, delay);
++			#endif
+ 			this_timer = f->updated + delay;
+ 			if (time_before_eq(this_timer, jiffies))
+ 				fdb_delete(br, f);
+--- a/net/Makefile
++++ b/net/Makefile
+@@ -73,4 +73,8 @@ obj-$(CONFIG_VSOCKETS)	+= vmw_vsock/
+ 
+ ifeq ($(CONFIG_RTL_IPTABLES_FAST_PATH),y)
+ obj-$(CONFIG_RTL_IPTABLES_FAST_PATH) += rtl/features/
++else
++ifeq ($(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS),y)
++obj-$(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS) += rtl/features/
++endif
+ endif
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -50,7 +50,7 @@
+ #include <net/netfilter/nf_nat.h>
+ #include <net/netfilter/nf_nat_core.h>
+ #include <net/netfilter/nf_nat_helper.h>
+-#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)||defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
+ #include <net/rtl/features/rtl_ps_hooks.h>
+ #include <net/rtl/features/rtl_ps_log.h>
+ #include <net/rtl/features/rtl_features.h>
+@@ -70,7 +70,7 @@ int (*nf_nat_seq_adjust_hook)(struct sk_
+ 			      unsigned int protoff);
+ EXPORT_SYMBOL_GPL(nf_nat_seq_adjust_hook);
+ 
+-#ifndef CONFIG_RTL_IPTABLES_FAST_PATH
++#if !defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)&&!defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+ DEFINE_SPINLOCK(nf_conntrack_lock);
+ EXPORT_SYMBOL_GPL(nf_conntrack_lock);
+ #endif
+@@ -210,7 +210,7 @@ destroy_conntrack(struct nf_conntrack *n
+ 	struct nf_conn *ct = (struct nf_conn *)nfct;
+ 	struct net *net = nf_ct_net(ct);
+ 	struct nf_conntrack_l4proto *l4proto;
+-	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) || defined(CONFIG_RTL_HARDWARE_NAT)
+ 	rtl_nf_conntrack_inso_s	conn_info;
+ 	#endif
+ 
+@@ -221,7 +221,7 @@ destroy_conntrack(struct nf_conntrack *n
+ 	/* To make sure we don't get any weird locking issues here:
+ 	 * destroy_conntrack() MUST NOT be called with a write lock
+ 	 * to nf_conntrack_lock!!! -HW */
+-	 #if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) || defined(CONFIG_RTL_HARDWARE_NAT)
+ 	conn_info.net = net;
+ 	conn_info.ct = ct;
+ 
+@@ -320,7 +320,7 @@ static void death_by_timeout(unsigned lo
+ 	struct nf_conn *ct = (void *)ul_conntrack;
+ 	struct nf_conn_tstamp *tstamp;
+ 
+-	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) || defined(CONFIG_RTL_HARDWARE_NAT)
+ 	struct net *net = nf_ct_net(ct);
+ 	rtl_nf_conntrack_inso_s	conn_info;
+ 
+--- a/net/netfilter/nf_nat_core.c
++++ b/net/netfilter/nf_nat_core.c
+@@ -29,7 +29,7 @@
+ #include <net/netfilter/nf_conntrack_zones.h>
+ #include <linux/netfilter/nf_nat.h>
+ 
+-#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)||defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
+ #include <linux/inetdevice.h>
+ #include <net/rtl/rtl_types.h>
+ #include <net/rtl/rtl865x_netif.h>
+@@ -356,10 +356,17 @@ get_unique_tuple(struct nf_conntrack_tup
+ 					      &range->min_proto,
+ 					      &range->max_proto) &&
+ 			    (range->min_proto.all == range->max_proto.all ||
+-			     !nf_nat_used_tuple(tuple, ct)))
+-				goto out;
++			     !nf_nat_used_tuple(tuple, ct))) {
++#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS) && defined(CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
++			       if (rtl_check_pre_reserver_conn(tuple, orig_tuple, range, ct, maniptype) == SUCCESS)
++#endif
++					goto out;
++			}
+ 		} else if (!nf_nat_used_tuple(tuple, ct)) {
+-			goto out;
++#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS) && defined(CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
++			if (rtl_check_pre_reserver_conn(tuple, orig_tuple, range, ct, maniptype) == SUCCESS)
++#endif
++				goto out;
+ 		}
+ 	}
+ 
+@@ -443,6 +450,9 @@ EXPORT_SYMBOL(nf_nat_setup_info);
+ #if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+ extern int fast_nat_fw;
+ #endif
++#if defined(CONFIG_RTL_HARDWARE_NAT)
++extern int gHwNatEnabled;
++#endif
+ 
+ /* Do packet manipulations according to nf_nat_setup_info. */
+ unsigned int nf_nat_packet(struct nf_conn *ct,
+@@ -455,7 +465,7 @@ unsigned int nf_nat_packet(struct nf_con
+ 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
+ 	unsigned long statusbit;
+ 	enum nf_nat_manip_type mtype = HOOK2MANIP(hooknum);
+-#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT)
+ 	rtl_nf_conntrack_inso_s	conn_info;
+ #endif
+ 
+@@ -481,8 +491,15 @@ unsigned int nf_nat_packet(struct nf_con
+ 		if (!l3proto->manip_pkt(skb, 0, l4proto, &target, mtype))
+ 			return NF_DROP;
+ 
+-		#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
+-		if (fast_nat_fw)
++		#if defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT)
++		if ( 0
++			#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++			||fast_nat_fw
++			#endif
++			#if defined(CONFIG_RTL_HARDWARE_NAT)
++			||gHwNatEnabled
++			#endif
++           )
+ 		{
+ 			conn_info.ct = ct;
+ 			conn_info.skb = skb;
+--- a/include/net/netfilter/nf_nat.h
++++ b/include/net/netfilter/nf_nat.h
+@@ -48,6 +48,9 @@ struct nf_conn_nat {
+     defined(CONFIG_IP6_NF_TARGET_MASQUERADE_MODULE)
+ 	int masq_index;
+ #endif
++#if defined(CONFIG_RTL_HARDWARE_NAT)
++	int hw_acc; /* 1: hardware acceleration, 0: software only */
++#endif
+ };
+ 
+ /* Set up the info structure to map into this range. */
+--- a/net/core/neighbour.c
++++ b/net/core/neighbour.c
+@@ -39,6 +39,10 @@
+ #include <linux/string.h>
+ #include <linux/log2.h>
+ 
++#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
++#include <net/rtl/features/rtl_ps_hooks.h>
++#endif
++
+ #define DEBUG
+ #define NEIGH_DEBUG 1
+ #define neigh_dbg(level, fmt, ...)		\
+@@ -800,6 +804,19 @@ static void neigh_periodic_work(struct w
+ 			if (atomic_read(&n->refcnt) == 1 &&
+ 			    (state == NUD_FAILED ||
+ 			     time_after(jiffies, n->used + n->parms->gc_staletime))) {
++			     	#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
++				if (RTL_PS_HOOKS_BREAK==rtl_neigh_periodic_timer_hooks(n, 0)) {
++					write_unlock(&n->lock);
++					goto next_elt;
++				}
++
++				#if 0
++				printk("%s:%d: ip:%u.%u.%u.%u, mac:%x:%x:%x:%x:%x:%x,n->nud_state is 0x%x,tval is %d\n",
++				__FUNCTION__,__LINE__,NIPQUAD(htonl(*((u32 *)n->primary_key))), n->ha[0], n->ha[1],
++				n->ha[2], n->ha[3], n->ha[4], n->ha[5],n->nud_state,tval);
++				#endif
++				#endif
++
+ 				*np = n->next;
+ 				n->dead = 1;
+ 				write_unlock(&n->lock);
+@@ -895,6 +912,10 @@ static void neigh_timer_handler(unsigned
+ 	if (!(state & NUD_IN_TIMER))
+ 		goto out;
+ 
++	#if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
++	rtl_neigh_timer_handler_pre_update_hooks(neigh, state);
++	#endif
++
+ 	if (state & NUD_REACHABLE) {
+ 		if (time_before_eq(now,
+ 				   neigh->confirmed + neigh->parms->reachable_time)) {

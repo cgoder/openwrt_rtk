@@ -1,0 +1,13 @@
+diff -urN old/net/wireless/wext-compat.c patch/net/wireless/wext-compat.c
+--- old/net/wireless/wext-compat.c	2014-10-31 11:07:28.000000000 +0800
++++ patch/net/wireless/wext-compat.c	2014-11-05 10:57:13.000000000 +0800
+@@ -85,6 +85,9 @@
+ 	case IW_MODE_REPEAT:
+ 		type = NL80211_IFTYPE_WDS;
+ 		break;
++	case IW_MODE_MASTER:
++		type = NL80211_IFTYPE_AP;
++		break;
+ 	case IW_MODE_MONITOR:
+ 		type = NL80211_IFTYPE_MONITOR;
+ 		break;

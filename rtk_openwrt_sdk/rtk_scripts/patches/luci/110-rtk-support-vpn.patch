@@ -1,0 +1,16 @@
+--- a/modules/admin-full/luasrc/controller/admin/network.lua
++++ b/modules/admin-full/luasrc/controller/admin/network.lua
+@@ -143,6 +143,13 @@ function index()
+ 		page.title  = _("Static Routes")
+ 		page.order  = 50
+ 
++		if nixio.fs.access("/etc/config/openvpn") then
++                page  = node("admin", "network", "openvpn")
++                page.target = cbi("admin_network/openvpn")
++                page.title  = _("OpenVPN")
++                page.order  = 65
++                end
++
+ 		page = node("admin", "network", "diagnostics")
+ 		page.target = template("admin_network/diagnostics")
+ 		page.title  = _("Diagnostics")

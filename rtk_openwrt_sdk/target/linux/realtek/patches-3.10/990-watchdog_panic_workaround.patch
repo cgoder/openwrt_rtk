@@ -1,0 +1,16 @@
+diff -urN a/kernel/panic.c b/kernel/panic.c
+--- a/kernel/panic.c	2014-03-13 14:20:59.000000000 +0800
++++ b/kernel/panic.c	2014-03-13 14:22:14.000000000 +0800
+@@ -171,6 +171,12 @@
+ 		disabled_wait(caller);
+ 	}
+ #endif
++#ifdef CONFIG_OPENWRT_SDK
++        {
++        extern void bsp_reboot(void);
++        bsp_reboot();
++        }
++#endif
+ 	local_irq_enable();
+ 	for (i = 0; ; i += PANIC_TIMER_STEP) {
+ 		touch_softlockup_watchdog();

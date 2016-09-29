@@ -1,0 +1,13 @@
+diff -urN hostapd-2014-06-03.1_orig/src/ap/hostapd.c hostapd-2014-06-03.1_patch/src/ap/hostapd.c
+--- hostapd-2014-06-03.1_orig/src/ap/hostapd.c	2015-07-08 16:33:47.017345293 +0800
++++ hostapd-2014-06-03.1_patch/src/ap/hostapd.c	2015-07-08 16:33:28.009346042 +0800
+@@ -71,6 +71,9 @@
+ 
+ 	ssid = &hapd->conf->ssid;
+ 
++	if(hapd->iconf->vht_oper_chwidth == VHT_CHANWIDTH_USE_HT)
++		hapd->iconf->vht_oper_centr_freq_seg0_idx = hapd->iconf->channel + hapd->iconf->secondary_channel * 2;
++
+ 	hostapd_set_freq(hapd, hapd->iconf->hw_mode, hapd->iface->freq,
+ 			 hapd->iconf->channel,
+ 			 hapd->iconf->ieee80211n,

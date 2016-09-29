@@ -1,0 +1,24 @@
+NAME=rtl8821a_mp_chip_bt40_fw_asic_rom_patch_linux_uart
+
+===============================================================================
+              RTL8821A RTK Linux UART Bluetooth Patch Code Released Note
+===============================================================================
+   Build Time   : 2013/12/12  AM 18:01:15
+   Output File  : NAME_0x1E2F_A042_131212_1801_new.bin
+   File Version : 0x1E2F_A042
+===============================================================================
+* HCI Sub-Version : 0x1E2F
+* LMP Sub-Version : 0xA040
+* SVN Version : 11230
+* BTCOEX Version : 20130618-5050
+* Offset : 0x00000030 / Size : 19136 bytes
+* Updated Note :
+
+* HCI Sub-Version : 0x1E2F
+* LMP Sub-Version : 0xA040
+* SVN Version : 11231
+* BTCOEX Version : 20130618-5050
+* Offset : 0x00004B40 / Size : 16728 bytes
+* Updated Note :
+
+

@@ -1,0 +1,6 @@
+# All platforms listed in alphabetic order
+
+platforms += bsp
+
+# include the platform specific files
+include $(srctree)/arch/rlx/bsp/Platform

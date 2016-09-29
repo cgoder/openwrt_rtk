@@ -1,0 +1,153 @@
+diff -urN a/net/core/dev.c b/net/core/dev.c
+--- a/net/core/dev.c	2014-10-01 17:45:09.000000000 +0800
++++ b/net/core/dev.c	2014-10-08 19:40:51.000000000 +0800
+@@ -132,6 +132,11 @@
+ 
+ #include "net-sysfs.h"
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++unsigned int dut_ip = 0;
++EXPORT_SYMBOL(dut_ip);
++#endif
++
+ /* Instead of increasing this, you should create a hash table. */
+ #define MAX_GRO_SKBS 8
+ 
+@@ -3183,6 +3188,9 @@
+ int netif_rx(struct sk_buff *skb)
+ {
+ 	int ret;
++#if defined(CONFIG_RPS) && defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	struct iphdr *iph = (struct iphdr *)skb->data;
++#endif
+ 
+ 	/* if netpoll wants it, pretend we never saw it */
+ 	if (netpoll_rx(skb))
+@@ -3192,7 +3200,11 @@
+ 
+ 	trace_netif_rx(skb);
+ #ifdef CONFIG_RPS
+-	if (static_key_false(&rps_needed)) {
++	if (static_key_false(&rps_needed)
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++		&& iph && (iph->daddr != dut_ip)
++#endif
++	) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+ 		int cpu;
+ 
+@@ -3622,13 +3634,21 @@
+  */
+ int netif_receive_skb(struct sk_buff *skb)
+ {
++#if defined(CONFIG_RPS) && defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	struct iphdr *iph = (struct iphdr *)skb->data;
++#endif
++
+ 	net_timestamp_check(netdev_tstamp_prequeue, skb);
+ 
+ 	if (skb_defer_rx_timestamp(skb))
+ 		return NET_RX_SUCCESS;
+ 
+ #ifdef CONFIG_RPS
+-	if (static_key_false(&rps_needed)) {
++	if (static_key_false(&rps_needed)
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++		&& iph && (iph->daddr != dut_ip)
++#endif
++	) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+ 		int cpu, ret;
+ 
+diff -urN a/net/ipv4/ip_input.c b/net/ipv4/ip_input.c
+--- a/net/ipv4/ip_input.c	2014-10-01 17:45:00.000000000 +0800
++++ b/net/ipv4/ip_input.c	2014-10-01 17:47:52.000000000 +0800
+@@ -146,6 +146,12 @@
+ #include <linux/mroute.h>
+ #include <linux/netlink.h>
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++#include <net/rtl/rtl_nf.h>
++struct rnf_ops *rnf_hook = NULL;
++EXPORT_SYMBOL(rnf_hook);
++#endif
++
+ /*
+  *	Process Router Attention IP option (RFC 2113)
+  */
+@@ -252,6 +258,14 @@
+ 			return 0;
+ 	}
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	if (rnf_hook) {
++		return rnf_hook->local_in(NFPROTO_IPV4, 
++				NF_INET_LOCAL_IN, skb, skb->dev, NULL,
++			   ip_local_deliver_finish);
++	}
++#endif
++
+ 	return NF_HOOK(NFPROTO_IPV4, NF_INET_LOCAL_IN, skb, skb->dev, NULL,
+ 		       ip_local_deliver_finish);
+ }
+@@ -442,6 +456,14 @@
+ 	/* Must drop socket now because of tproxy. */
+ 	skb_orphan(skb);
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	if (rnf_hook) {
++		return rnf_hook->pre_routing(NFPROTO_IPV4, 
++					NF_INET_PRE_ROUTING, skb, dev, NULL,
++				   	ip_rcv_finish);
++	}
++#endif
++
+ 	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING, skb, dev, NULL,
+ 		       ip_rcv_finish);
+ 
+diff -urN a/net/ipv4/ip_output.c b/net/ipv4/ip_output.c
+--- a/net/ipv4/ip_output.c	2014-10-01 17:45:00.000000000 +0800
++++ b/net/ipv4/ip_output.c	2014-10-01 17:48:05.000000000 +0800
+@@ -80,6 +80,10 @@
+ #include <linux/netlink.h>
+ #include <linux/tcp.h>
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++#include <net/rtl/rtl_nf.h>
++#endif
++
+ int sysctl_ip_default_ttl __read_mostly = IPDEFTTL;
+ EXPORT_SYMBOL(sysctl_ip_default_ttl);
+ 
+@@ -97,6 +101,15 @@
+ 
+ 	iph->tot_len = htons(skb->len);
+ 	ip_send_check(iph);
++
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	if (rnf_hook) {
++		return rnf_hook->local_out(NFPROTO_IPV4, 
++					NF_INET_LOCAL_OUT, skb, NULL,
++			       skb_dst(skb)->dev, dst_output);
++	}
++#endif
++
+ 	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT, skb, NULL,
+ 		       skb_dst(skb)->dev, dst_output);
+ }
+@@ -304,6 +317,15 @@
+ 	skb->dev = dev;
+ 	skb->protocol = htons(ETH_P_IP);
+ 
++#if defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP)
++	if (rnf_hook) {
++		return rnf_hook->post_routing(NFPROTO_IPV4, 
++					NF_INET_POST_ROUTING, skb, NULL, dev,
++				    ip_finish_output,
++				    !(IPCB(skb)->flags & IPSKB_REROUTED));
++	}
++#endif
++
+ 	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL, dev,
+ 			    ip_finish_output,
+ 			    !(IPCB(skb)->flags & IPSKB_REROUTED));

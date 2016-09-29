@@ -1,0 +1,35 @@
+#
+# Board Configuration
+#
+menu "Board Configuration"
+
+choice
+	prompt "Board"
+	default RTL_8196DT_GW
+
+config RTL_8196DT_GW
+	bool "96DT+92D GW"
+	#select FPGA_PLATFORM
+	select RTL_8196D
+	select RTL_819XDT
+	select RTL_819XD_GW
+	select RTL819X_SPI_FLASH
+	select AUTO_PCIE_PHY_SCAN
+	select RTL_NETDEV_NO_PRIV
+	help
+		This enables support for Realtek RTL8196DT demo board
+
+config RTL_8197DT_GW
+	bool "97DT+92C+92D GW"
+	select RTL_8197D
+	select RTL_819XDT
+	select RTL_819XD_GW
+	select RTL819X_SPI_FLASH
+	select RTL_NETDEV_NO_PRIV
+	help
+		This enables support for Realtek RTL8197DT demo board
+          
+endchoice
+
+endmenu
+

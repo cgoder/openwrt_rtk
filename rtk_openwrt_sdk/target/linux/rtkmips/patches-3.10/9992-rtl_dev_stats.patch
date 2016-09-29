@@ -1,0 +1,92 @@
+--- a/include/net/netfilter/nf_conntrack.h
++++ b/include/net/netfilter/nf_conntrack.h
+@@ -98,6 +98,7 @@ struct nf_conn {
+ #ifdef CONFIG_NF_CONNTRACK_SECMARK
+ 	u_int32_t secmark;
+ #endif
++    void *conn_dev;
+ 
+ 	/* Extensions */
+ 	struct nf_ct_ext *ext;
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -84,6 +84,11 @@ config RTL_FASTPATH_HWNAT_SUPPORT_KERNEL
+         depends on RTL_819X
+         default y
+ 
++config RTL_SPEED_MONITOR
++        bool "Realtek dev stats speed monitor"
++        depends on RTL_819X
++        default n
++
+ config IP_FIB_TRIE_STATS
+ 	bool "FIB TRIE statistics"
+ 	depends on IP_ADVANCED_ROUTER
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -56,6 +56,9 @@
+ #include <net/rtl/features/rtl_features.h>
+ #include <linux/in.h>
+ #endif
++#if defined(CONFIG_RTL_SPEED_MONITOR)
++#include <net/rtl/features/rtl_dev_stats.h>
++#endif
+ 
+ #define NF_CONNTRACK_VERSION	"0.5.0"
+ 
+@@ -70,7 +73,7 @@ int (*nf_nat_seq_adjust_hook)(struct sk_
+ 			      unsigned int protoff);
+ EXPORT_SYMBOL_GPL(nf_nat_seq_adjust_hook);
+ 
+-#if !defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)&&!defined(CONFIG_RTL_IPTABLES_FAST_PATH)
++#if !defined(CONFIG_RTL_819X)
+ DEFINE_SPINLOCK(nf_conntrack_lock);
+ EXPORT_SYMBOL_GPL(nf_conntrack_lock);
+ #endif
+@@ -227,6 +230,9 @@ destroy_conntrack(struct nf_conntrack *n
+ 
+ 	rtl_nf_conntrack_destroy_hooks(&conn_info);
+ 	#endif
++    #if defined(CONFIG_RTL_SPEED_MONITOR)
++    rtl_dec_con_dev_ref_hook(ct);
++    #endif
+ 
+ 	rcu_read_lock();
+ 	l4proto = __nf_ct_l4proto_find(nf_ct_l3num(ct), nf_ct_protonum(ct));
+--- a/net/netfilter/nf_nat_core.c
++++ b/net/netfilter/nf_nat_core.c
+@@ -37,6 +37,9 @@
+ #include <net/rtl/features/rtl_ps_hooks.h>
+ #include <net/rtl/features/rtl_ps_log.h>
+ #endif
++#if defined(CONFIG_RTL_SPEED_MONITOR)
++#include <net/rtl/features/rtl_dev_stats.h>
++#endif
+ 
+ static DEFINE_SPINLOCK(nf_nat_lock);
+ 
+@@ -508,6 +511,9 @@ unsigned int nf_nat_packet(struct nf_con
+ 			rtl_nf_nat_packet_hooks(&conn_info);
+ 		}
+ 		#endif
++        #if defined(CONFIG_RTL_SPEED_MONITOR)
++        rtl_build_con_dev_stats_hook(ct,skb);
++        #endif
+ 
+ 
+ 	}
+--- a/net/Makefile
++++ b/net/Makefile
+@@ -71,10 +71,6 @@ obj-$(CONFIG_NFC)		+= nfc/
+ obj-$(CONFIG_OPENVSWITCH)	+= openvswitch/
+ obj-$(CONFIG_VSOCKETS)	+= vmw_vsock/
+ 
+-ifeq ($(CONFIG_RTL_IPTABLES_FAST_PATH),y)
+-obj-$(CONFIG_RTL_IPTABLES_FAST_PATH) += rtl/features/
+-else
+-ifeq ($(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS),y)
+-obj-$(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS) += rtl/features/
+-endif
++ifeq ($(CONFIG_RTL_819X),y)
++obj-$(CONFIG_RTL_819X) += rtl/features/
+ endif

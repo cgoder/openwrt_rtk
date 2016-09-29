@@ -1,0 +1,71 @@
+#
+# Copyright (C) 2012 OpenWrt.org
+#
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+
+include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
+
+PKG_NAME:=rtl_sendfile
+PKG_VERSION:=0.1
+PKG_RELEASE:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+include $(TOPDIR)/.config
+
+ifdef CONFIG_TARGET_realtek_rtl8196e
+TARGET_DIR:=4181
+endif
+
+ifdef CONFIG_TARGET_realtek_rtl8881a
+TARGET_DIR:=5281
+endif
+
+ifdef CONFIG_TARGET_realtek_rtl819xd
+TARGET_DIR:=5281
+endif
+
+ifdef CONFIG_TARGET_rtkmips_rtl8198c
+TARGET_DIR:=msdk
+endif
+
+ifdef CONFIG_TARGET_rtkmips_rtl8954e
+TARGET_DIR:=msdk
+endif
+
+ifdef CONFIG_TARGET_rtkmipsel
+TARGET_DIR:= msdkl
+endif
+
+define KernelPackage/rtl_sendfile
+  SUBMENU:=Network Support
+  TITLE:=rtl_sendfile fastpath
+  FILES:=$(PKG_BUILD_DIR)/rtl_sendfile.ko
+  KCONFIG:=CONFIG_RTL_SENDFILE_PATCH=y
+  AUTOLOAD:=$(call AutoLoad,50,rtl_sendfile)
+endef
+
+define KernelPackage/rtl_sendfile/description
+  Improve performance on socket-to-file by using zero copy techonology.
+endef
+
+include $(INCLUDE_DIR)/kernel-defaults.mk
+
+define Build/Prepare
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)
+	cp src/Makefile src/reverse_sendfile_common.c $(PKG_BUILD_DIR)/
+	$(INSTALL_BIN) release/reverse_sendfile-$(TARGET_DIR).S $(PKG_BUILD_DIR)/reverse_sendfile.S
+endef
+
+define Build/Compile
+	$(MAKE) $(KERNEL_MAKEOPTS) SUBDIRS="$(PKG_BUILD_DIR)" modules
+endef
+
+define KernelPackage/rtl_sendfile/install
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/rtl_sendfile.ko $(1)/lib/modules/3.10.49
+endef
+
+$(eval $(call KernelPackage,rtl_sendfile))

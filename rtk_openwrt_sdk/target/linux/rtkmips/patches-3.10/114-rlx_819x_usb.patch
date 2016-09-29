@@ -1,0 +1,128 @@
+--- a/drivers/usb/host/ehci-hcd.c
++++ b/drivers/usb/host/ehci-hcd.c
+@@ -368,6 +368,25 @@ static void ehci_shutdown(struct usb_hcd
+ 	hrtimer_cancel(&ehci->hrtimer);
+ }
+ 
++#if defined CONFIG_WRT_BARRIER_BREAKER
++static void ehci_port_power (struct ehci_hcd *ehci, int is_on)
++{
++	unsigned port;
++
++	if (!HCS_PPC (ehci->hcs_params))
++		return;
++
++	ehci_dbg (ehci, "...power%s ports...\n", is_on ? "up" : "down");
++	for (port = HCS_N_PORTS (ehci->hcs_params); port > 0; )
++		(void) ehci_hub_control(ehci_to_hcd(ehci),
++				is_on ? SetPortFeature : ClearPortFeature,
++				USB_PORT_FEAT_POWER,
++				port--, NULL, 0);
++	/* Flush those writes */
++	ehci_readl(ehci, &ehci->regs->command);
++	msleep(20);
++}
++#endif
+ /*-------------------------------------------------------------------------*/
+ 
+ /*
+@@ -1286,6 +1305,11 @@ MODULE_LICENSE ("GPL");
+ #define	PLATFORM_DRIVER		ehci_hcd_sead3_driver
+ #endif
+ 
++#ifdef CONFIG_RTL_819X
++#include "ehci-rtl819x.c"
++#define PLATFORM_DRIVER     ehci_rtl819x_driver
++#endif
++
+ static int __init ehci_hcd_init(void)
+ {
+ 	int retval = 0;
+--- a/drivers/usb/host/ohci-hcd.c
++++ b/drivers/usb/host/ohci-hcd.c
+@@ -1196,6 +1196,11 @@ MODULE_LICENSE ("GPL");
+ #define PLATFORM_DRIVER		ohci_platform_driver
+ #endif
+ 
++#ifdef CONFIG_RTL_819X
++#include "ohci-rtl819x.c"
++#define PLATFORM_DRIVER     ohci_hcd_rtl819x_driver
++#endif
++
+ #if	!defined(PCI_DRIVER) &&		\
+ 	!defined(PLATFORM_DRIVER) &&	\
+ 	!defined(OMAP1_PLATFORM_DRIVER) &&	\
+--- a/drivers/usb/host/ehci.h
++++ b/drivers/usb/host/ehci.h
+@@ -668,6 +668,9 @@
+ static inline unsigned int ehci_readl(const struct ehci_hcd *ehci,
+ 		__u32 __iomem * regs)
+ {
++#if defined(CONFIG_RTL_819X)
++			return (le32_to_cpu((*(volatile unsigned long *)(regs))));
++#else
+ #ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
+ 	return ehci_big_endian_mmio(ehci) ?
+ 		readl_be(regs) :
+@@ -675,6 +678,7 @@
+ #else
+ 	return readl(regs);
+ #endif
++#endif
+ }
+ 
+ #ifdef CONFIG_SOC_IMX28
+@@ -692,6 +696,9 @@
+ static inline void ehci_writel(const struct ehci_hcd *ehci,
+ 		const unsigned int val, __u32 __iomem *regs)
+ {
++#if defined(CONFIG_RTL_819X)
++			((*(volatile unsigned long *)(regs))=cpu_to_le32(val));
++#else
+ #ifdef CONFIG_USB_EHCI_BIG_ENDIAN_MMIO
+ 	ehci_big_endian_mmio(ehci) ?
+ 		writel_be(val, regs) :
+@@ -702,6 +709,7 @@
+        else
+ 	writel(val, regs);
+ #endif
++#endif
+ }
+ 
+ /*
+--- a/drivers/usb/host/ohci.h
++++ b/drivers/usb/host/ohci.h
+@@ -555,6 +555,9 @@ static inline struct usb_hcd *ohci_to_hc
+ static inline unsigned int _ohci_readl (const struct ohci_hcd *ohci,
+ 					__hc32 __iomem * regs)
+ {
++#if defined(CONFIG_RTL_819X)
++			return (le32_to_cpu((*(volatile unsigned long *)(regs))));
++#else
+ #ifdef CONFIG_USB_OHCI_BIG_ENDIAN_MMIO
+ 	return big_endian_mmio(ohci) ?
+ 		readl_be (regs) :
+@@ -562,11 +565,15 @@ static inline unsigned int _ohci_readl (
+ #else
+ 	return readl (regs);
+ #endif
++#endif
+ }
+ 
+ static inline void _ohci_writel (const struct ohci_hcd *ohci,
+ 				 const unsigned int val, __hc32 __iomem *regs)
+ {
++#if defined(CONFIG_RTL_819X)
++			((*(volatile unsigned long *)(regs))=cpu_to_le32(val));
++#else
+ #ifdef CONFIG_USB_OHCI_BIG_ENDIAN_MMIO
+ 	big_endian_mmio(ohci) ?
+ 		writel_be (val, regs) :
+@@ -574,6 +581,7 @@ static inline void _ohci_writel (const s
+ #else
+ 		writel (val, regs);
+ #endif
++#endif
+ }
+ 
+ #define ohci_readl(o,r)		_ohci_readl(o,r)

@@ -1,0 +1,16 @@
+diff -urN a/Makefile b/Makefile
+--- a/Makefile	2013-12-09 15:59:58.000000000 +0800
++++ b/Makefile	2013-12-09 16:02:17.000000000 +0800
+@@ -755,7 +755,12 @@
+ # Externally visible symbols (used by link-vmlinux.sh)
+ export KBUILD_VMLINUX_INIT := $(head-y) $(init-y)
+ export KBUILD_VMLINUX_MAIN := $(core-y) $(libs-y) $(drivers-y) $(net-y)
++#export KBUILD_LDS          := arch/$(SRCARCH)/kernel/vmlinux.lds
++ifneq ($(ARCH_SOC),)
++export KBUILD_LDS          := arch/$(SRCARCH)/$(ARCH_SOC)/vmlinux.lds
++else
+ export KBUILD_LDS          := arch/$(SRCARCH)/kernel/vmlinux.lds
++endif
+ export LDFLAGS_vmlinux
+ # used by scripts/pacmage/Makefile
+ export KBUILD_ALLDIRS := $(sort $(filter-out arch/%,$(vmlinux-alldirs)) arch Documentation include samples scripts tools virt)

@@ -1,0 +1,205 @@
+--- a/drivers/tty/serial/8250/8250_core.c
++++ b/drivers/tty/serial/8250/8250_core.c
+@@ -161,7 +161,11 @@ static const struct serial8250_config ua
+ 		.fifo_size	= 16,
+ 		.tx_loadsz	= 16,
+ 		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10,
++#if defined(CONFIG_SERIAL_RTL_UART1)||defined(CONFIG_SERIAL_RTL_UART2)
++		.flags		= UART_CAP_FIFO | UART_CAP_AFE,
++#else
+ 		.flags		= UART_CAP_FIFO,
++#endif
+ 	},
+ 	[PORT_CIRRUS] = {
+ 		.name		= "Cirrus",
+@@ -2259,8 +2263,12 @@ static unsigned int serial8250_get_divis
+ 	else if ((port->flags & UPF_MAGIC_MULTIPLIER) &&
+ 		 baud == (port->uartclk/8))
+ 		quot = 0x8002;
+-	else
++	else {
+ 		quot = uart_get_divisor(port, baud);
++#ifdef CONFIG_RTL_819X
++		quot--;
++#endif
++	}	
+ 
+ 	return quot;
+ }
+@@ -2336,7 +2344,11 @@ serial8250_do_set_termios(struct uart_po
+ 	 * have sufficient FIFO entries for the latency of the remote
+ 	 * UART to respond.  IOW, at least 32 bytes of FIFO.
+ 	 */
+-	if (up->capabilities & UART_CAP_AFE && port->fifosize >= 32) {
++#if defined(CONFIG_SERIAL_RTL_UART1)||defined(CONFIG_SERIAL_RTL_UART2)
++	if (up->capabilities & UART_CAP_AFE && up->port.fifosize >= 16) {
++#else
++	if (up->capabilities & UART_CAP_AFE && up->port.fifosize >= 32) {
++#endif
+ 		up->mcr &= ~UART_MCR_AFE;
+ 		if (termios->c_cflag & CRTSCTS)
+ 			up->mcr |= UART_MCR_AFE;
+--- a/drivers/tty/serial/8250/Kconfig
++++ b/drivers/tty/serial/8250/Kconfig
+@@ -305,3 +305,17 @@ config SERIAL_8250_RT288X
+ 	  If you have a Ralink RT288x/RT305x SoC based board and want to use the
+ 	  serial port, say Y to this option. The driver can handle up to 2 serial
+ 	  ports. If unsure, say N.
++	  
++config SERIAL_RTL_UART1
++	bool "819x RTL UART1 support"
++	depends on SERIAL_8250 #&& SERIAL_8250_NR_UARTS >= 2 && SERIAL_8250_RUNTIME_UARTS >= 2
++	help
++		Enable RTL819x UART1 support, and this MAY add an uart device to ttyS1. 
++		NOTE: We don't provide option for this port to be console. 
++
++config SERIAL_RTL_UART2
++	bool "819x RTL UART2 support"
++	depends on SERIAL_8250 #&& SERIAL_8250_NR_UARTS >= 2 && SERIAL_8250_RUNTIME_UARTS >= 2
++	help
++		Enable RTL819x UART2 support, and this MAY add an uart device to ttyS2. 
++		NOTE: We don't provide option for this port to be console. 
+--- a/drivers/bluetooth/Kconfig
++++ b/drivers/bluetooth/Kconfig
+@@ -13,6 +13,18 @@ config BT_HCIBTUSB
+ 	  Say Y here to compile support for Bluetooth USB devices into the
+ 	  kernel or say M to compile it as module (btusb).
+ 
++
++config BT_RTK_HCIBTUSB
++        tristate "RTK HCI USB driver"
++        depends on USB
++        help
++          RTK Bluetooth HCI USB driver.
++          This driver is required if you want to use Bluetooth devices with
++          USB interface.
++
++          Say Y here to compile support for Bluetooth USB devices into the
++          kernel or say M to compile it as module (btusb).
++
+ config BT_HCIBTSDIO
+ 	tristate "HCI SDIO driver"
+ 	depends on MMC
+@@ -71,6 +83,16 @@ config BT_HCIUART_ATH3K
+ 
+ 	  Say Y here to compile support for HCI UART ATH3K protocol.
+ 
++config BT_HCIUART_RTKH5
++	bool "Realtek H5 protocol support"
++	depends on BT_HCIUART
++	help
++	  Realtek H5 is serial protocol for communication 
++	  between Realtek Bluetooth device and host. This protocol is required for 
++	  Realtek uart h5 bluetooth controller
++
++	  Say Y here to compile support for Realtek HCI H5 protocol.
++
+ config BT_HCIUART_LL
+ 	bool "HCILL protocol support"
+ 	depends on BT_HCIUART
+--- a/drivers/bluetooth/Makefile
++++ b/drivers/bluetooth/Makefile
+@@ -13,6 +13,8 @@ obj-$(CONFIG_BT_HCIBLUECARD)	+= bluecard
+ obj-$(CONFIG_BT_HCIBTUART)	+= btuart_cs.o
+ 
+ obj-$(CONFIG_BT_HCIBTUSB)	+= btusb.o
++obj-$(CONFIG_BT_RTK_HCIBTUSB)	+= rtk_bt.o
++obj-$(CONFIG_BT_RTK_HCIBTUSB)	+= rtk_coex.o
+ obj-$(CONFIG_BT_HCIBTSDIO)	+= btsdio.o
+ 
+ obj-$(CONFIG_BT_ATH3K)		+= ath3k.o
+@@ -27,6 +29,7 @@ hci_uart-y				:= hci_ldisc.o
+ hci_uart-$(CONFIG_BT_HCIUART_H4)	+= hci_h4.o
+ hci_uart-$(CONFIG_BT_HCIUART_BCSP)	+= hci_bcsp.o
+ hci_uart-$(CONFIG_BT_HCIUART_LL)	+= hci_ll.o
++hci_uart-$(CONFIG_BT_HCIUART_RTKH5) += hci_rtk_h5.o
+ hci_uart-$(CONFIG_BT_HCIUART_ATH3K)	+= hci_ath.o
+ hci_uart-$(CONFIG_BT_HCIUART_3WIRE)	+= hci_h5.o
+ hci_uart-objs				:= $(hci_uart-y)
+--- a/drivers/bluetooth/hci_ldisc.c
++++ b/drivers/bluetooth/hci_ldisc.c
+@@ -605,6 +605,12 @@ static int __init hci_uart_init(void)
+ #ifdef CONFIG_BT_HCIUART_LL
+ 	ll_init();
+ #endif
++//Realtek_add_start	
++//add realtek h5 support	
++#ifdef CONFIG_BT_HCIUART_RTKH5
++	h5_init();
++#endif
++//Realtek_add_end	
+ #ifdef CONFIG_BT_HCIUART_ATH3K
+ 	ath_init();
+ #endif
+@@ -628,6 +634,9 @@ static void __exit hci_uart_exit(void)
+ #ifdef CONFIG_BT_HCIUART_LL
+ 	ll_deinit();
+ #endif
++#ifdef CONFIG_BT_HCIUART_RTKH5
++	h5_deinit();
++#endif
+ #ifdef CONFIG_BT_HCIUART_ATH3K
+ 	ath_deinit();
+ #endif
+--- a/drivers/bluetooth/hci_uart.h
++++ b/drivers/bluetooth/hci_uart.h
+@@ -106,6 +106,13 @@ int ll_init(void);
+ int ll_deinit(void);
+ #endif
+ 
++//Realtek_add_start
++#ifdef CONFIG_BT_HCIUART_RTKH5
++int h5_init(void);
++int h5_deinit(void);
++#endif
++//Realtek_add_end
++
+ #ifdef CONFIG_BT_HCIUART_ATH3K
+ int ath_init(void);
+ int ath_deinit(void);
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -4037,7 +4037,7 @@ hub_port_init (struct usb_hub *hub, stru
+ 		udev->ttport = hdev->ttport;
+ 	} else if (udev->speed != USB_SPEED_HIGH
+ 			&& hdev->speed == USB_SPEED_HIGH) {
+-		if (!hub->tt.hub) {
++        if (hdev->parent &&  !hub->tt.hub) {
+ 			dev_err(&udev->dev, "parent hub has no TT\n");
+ 			retval = -EINVAL;
+ 			goto fail;
+--- a/net/bluetooth/hci_core.c
++++ b/net/bluetooth/hci_core.c
+@@ -3538,6 +3538,9 @@ static void hci_cmd_work(struct work_str
+ 	struct hci_dev *hdev = container_of(work, struct hci_dev, cmd_work);
+ 	struct sk_buff *skb;
+ 
++#ifdef CONFIG_RTL_819X
++    unsigned int  offset;
++#endif
+ 	BT_DBG("%s cmd_cnt %d cmd queued %d", hdev->name,
+ 	       atomic_read(&hdev->cmd_cnt), skb_queue_len(&hdev->cmd_q));
+ 
+@@ -3547,6 +3550,22 @@ static void hci_cmd_work(struct work_str
+ 		if (!skb)
+ 			return;
+ 
++#ifdef CONFIG_RTL_819X
++	// fix unalignment issue for OTG USB
++        offset = ((unsigned long)skb->data) % 4;
++        if (offset) {
++            if (skb_headroom(skb) >= offset) {
++                /*printk("Headroom %d, offset %d.\n", skb_headroom(skb), offset);*/
++                memmove(skb->data-offset, skb->data, skb->len);
++                skb->data -= offset;
++                skb->tail -=offset;
++            } else
++            {
++            		printk("unalignment and no head room\n");
++            }
++        }
++#endif
++
+ 		kfree_skb(hdev->sent_cmd);
+ 
+ 		hdev->sent_cmd = skb_clone(skb, GFP_ATOMIC);
