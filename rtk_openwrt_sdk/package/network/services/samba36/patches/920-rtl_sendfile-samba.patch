@@ -1,0 +1,131 @@
+diff -ruN before/source3/lib/recvfile.c after/source3/lib/recvfile.c
+--- before/source3/lib/recvfile.c	2014-06-23 14:03:27.000000000 +0800
++++ after/source3/lib/recvfile.c	2015-05-08 15:14:01.721017787 +0800
+@@ -143,11 +143,21 @@
+ 			SMB_OFF_T offset,
+ 			size_t count)
+ {
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	static bool try_splice_call = true;
++	int retry_count = 10;
++#else
+ 	static int pipefd[2] = { -1, -1 };
+ 	static bool try_splice_call = false;
++#endif
+ 	size_t total_written = 0;
+ 	loff_t splice_offset = offset;
+-
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	size_t need_written = count;
++	size_t transfer_count;
++	int	threshold = 1024 * 128;	// 128k
++#endif
++	
+ 	DEBUG(10,("sys_recvfile: from = %d, to = %d, "
+ 		"offset=%.0f, count = %lu\n",
+ 		fromfd, tofd, (double)offset,
+@@ -171,20 +181,38 @@
+ 				count);
+ 	}
+ 
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ 	if ((pipefd[0] == -1) && (pipe(pipefd) == -1)) {
+ 		try_splice_call = false;
+ 		return default_sys_recvfile(fromfd, tofd, offset, count);
+ 	}
++#endif
+ 
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	while (total_written < count) {
++#else
+ 	while (count > 0) {
++#endif
+ 		int nread, to_write;
+ 
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++		transfer_count = (need_written > threshold) ? threshold : need_written;
++		nread = splice(fromfd, NULL, tofd, &offset, transfer_count, SPLICE_F_MOVE);
++#else
+ 		nread = splice(fromfd, NULL, pipefd[1], NULL,
+ 			       MIN(count, 16384), SPLICE_F_MOVE);
++#endif
+ 		if (nread == -1) {
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++			if (errno == EINTR || errno == EAGAIN) {
++				if (retry_count--  > 0)
++					continue;
++			}
++#else
+ 			if (errno == EINTR) {
+ 				continue;
+ 			}
++#endif
+ 			if (total_written == 0 &&
+ 			    (errno == EBADF || errno == EINVAL)) {
+ 				try_splice_call = false;
+@@ -193,7 +221,7 @@
+ 			}
+ 			break;
+ 		}
+-
++#ifndef CONFIG_RTL_SENDFILE_PATCH
+ 		to_write = nread;
+ 		while (to_write > 0) {
+ 			int thistime;
+@@ -205,12 +233,31 @@
+ 			}
+ 			to_write -= thistime;
+ 		}
++#endif
+ 
+ 		total_written += nread;
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++		need_written -= nread;
++#else
+ 		count -= nread;
++#endif
+ 	}
+ 
+- done:
++ done:	
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	if (total_written < count) {
++        if(errno == EDQUOT || errno == ENOSPC){
++    		int saved_errno = errno;
++	    	if (drain_socket(fromfd, count-total_written) !=
++		    		count-total_written) {
++			    /* socket is dead. */
++    			return -1;
++	    	}
++		    errno = saved_errno;
++        }
++        else
++            return -1;
++#else   
+ 	if (count) {
+ 		int saved_errno = errno;
+ 		if (drain_socket(fromfd, count) != count) {
+@@ -218,6 +265,7 @@
+ 			return -1;
+ 		}
+ 		errno = saved_errno;
++#endif
+ 	}
+ 
+ 	return total_written;
+@@ -244,6 +292,9 @@
+ 
+ ssize_t drain_socket(int sockfd, size_t count)
+ {
++#ifdef CONFIG_RTL_SENDFILE_PATCH
++	return default_sys_recvfile(sockfd, -1, (SMB_OFF_T)-1, count);
++#else
+ 	size_t total = 0;
+ 	size_t bufsize = MIN(TRANSFER_BUF_SIZE,count);
+ 	char *buffer = NULL;
+@@ -273,4 +324,5 @@
+ 
+ 	free(buffer);
+ 	return count;
++#endif
+ }

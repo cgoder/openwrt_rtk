@@ -1,0 +1,43 @@
+--- a/libfstools/mtd.c
++++ b/libfstools/mtd.c
+@@ -186,12 +186,22 @@ static int mtd_volume_identify(struct vo
+ 	__u32 deadc0de;
+ 	__u16 jffs2;
+ 	size_t sz;
++	unsigned char oobbuf[64];
++	struct mtd_oob_buf oob = {0, 24, oobbuf};
++	
+ 
+ 	if (mtd_volume_load(v)) {
+ 		fprintf(stderr, "reading %s failed\n", v->name);
+ 		return -1;
+ 	}
+ 
++	 if(v->type == NANDFLASH){
++        memset(oobbuf, 0, sizeof(oobbuf));
++        if (ioctl(p->fd, MEMREADOOB, &oob) != 0) {
++			fprintf(stderr, "ioctl(MEMREADOOB)");
++            return -1;
++        }
++    }
+ 	sz = read(p->fd, &deadc0de, sizeof(deadc0de));
+ 
+ 	if (sz != sizeof(deadc0de)) {
+@@ -208,7 +218,16 @@ static int mtd_volume_identify(struct vo
+ 		return FS_DEADCODE;
+ 	}
+ 
+-	jffs2 = __be16_to_cpu(deadc0de >> 16);
++
++
++	if(v->type == NANDFLASH){
++		memcpy(&deadc0de,oobbuf,4);
++		/* not need convert */
++        jffs2 = (__u16)(deadc0de >> 16);
++     }
++    else
++		jffs2 = __be16_to_cpu(deadc0de >> 16);
++		
+ 	if (jffs2 == 0x1985) {
+ 		fprintf(stderr, "jffs2 is ready\n");
+ 		return FS_JFFS2;
